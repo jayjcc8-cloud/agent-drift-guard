@@ -40,7 +40,7 @@ class CodexAdapter(PlatformAdapter):
         return PlatformCapabilities(
             platform="codex",
             platform_version=self._platform_version,
-            adapter_version="0.2.0",
+            adapter_version="0.5.0",
             capabilities=frozenset(
                 {
                     Capability.OBSERVE_SESSION,
