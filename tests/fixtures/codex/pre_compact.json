@@ -1,0 +1,9 @@
+{
+  "session_id": "session-1",
+  "turn_id": "turn-1",
+  "transcript_path": "/tmp/codex-session.jsonl",
+  "cwd": "/project",
+  "hook_event_name": "PreCompact",
+  "trigger": "auto"
+}
+

@@ -1,0 +1,22 @@
+{
+  "protocol_version": "0.1",
+  "platform": "codex",
+  "platform_version": "example",
+  "adapter_version": "0.1.0",
+  "capabilities": [
+    "observe.session",
+    "observe.prompt",
+    "observe.tool",
+    "observe.tool_result",
+    "observe.compaction",
+    "observe.subagent",
+    "observe.stop",
+    "control.block_tool",
+    "control.inject_context",
+    "control.block_stop"
+  ],
+  "notes": [
+    "This is a protocol example, not a claim about a specific installed Codex version."
+  ]
+}
+

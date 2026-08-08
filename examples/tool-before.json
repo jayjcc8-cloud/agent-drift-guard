@@ -1,0 +1,23 @@
+{
+  "protocol_version": "0.1",
+  "event_type": "tool.before",
+  "platform": "codex",
+  "platform_version": "example",
+  "session_id": "session-abc123",
+  "turn_id": "turn-42",
+  "agent_id": "main",
+  "repo_root": "/project",
+  "cwd": "/project/src",
+  "timestamp": "2026-08-08T12:00:00+08:00",
+  "sequence": 17,
+  "payload": {
+    "tool": "shell",
+    "arguments": {
+      "command": "pytest"
+    }
+  },
+  "extensions": {
+    "codex.raw_hook_name": "PreToolUse"
+  }
+}
+

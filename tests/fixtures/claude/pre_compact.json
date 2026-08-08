@@ -1,0 +1,10 @@
+{
+  "session_id": "session-1",
+  "prompt_id": "turn-1",
+  "transcript_path": "/tmp/claude-session.jsonl",
+  "cwd": "/project",
+  "hook_event_name": "PreCompact",
+  "trigger": "auto",
+  "custom_instructions": ""
+}
+

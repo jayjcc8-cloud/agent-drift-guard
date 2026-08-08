@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a reproducible protocol, Adapter, Detector, Store, or installer problem.
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: Description
+      description: What happened and what did you expect?
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Agent Drift Guard version
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Platform
+      options: [Codex, Claude Code, Core or Store, Other]
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Sanitized reproduction
+      description: Remove prompts, credentials, home paths, and proprietary tool output.
+    validations:
+      required: true
+  - type: checkboxes
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I verified that this report contains no secrets or private transcript data.
+          required: true

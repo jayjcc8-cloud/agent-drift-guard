@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-drift-guard"
+version = "0.4.0"
+description = "Platform-neutral runtime supervision contracts for AI coding agents"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Agent Drift Guard contributors" }]
+license = "MIT"
+keywords = ["ai-agents", "codex", "claude-code", "runtime-supervision", "hooks"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = ["pydantic>=2.8,<3"]
+
+[project.urls]
+Homepage = "https://github.com/jayjcc8-cloud/agent-drift-guard"
+Issues = "https://github.com/jayjcc8-cloud/agent-drift-guard/issues"
+Repository = "https://github.com/jayjcc8-cloud/agent-drift-guard.git"
+
+[project.scripts]
+agent-drift = "agent_drift.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_drift"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]

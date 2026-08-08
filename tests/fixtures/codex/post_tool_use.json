@@ -1,0 +1,20 @@
+{
+  "session_id": "session-1",
+  "turn_id": "turn-1",
+  "transcript_path": "/tmp/codex-session.jsonl",
+  "cwd": "/project",
+  "permission_mode": "default",
+  "model": "gpt-example",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "pytest"
+  },
+  "tool_use_id": "tool-1",
+  "tool_response": {
+    "stdout": "21 passed",
+    "stderr": "",
+    "exit_code": 0
+  }
+}
+

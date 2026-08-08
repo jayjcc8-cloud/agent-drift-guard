@@ -1,0 +1,25 @@
+{
+  "task": {
+    "goal": "Complete the current milestone without expanding scope.",
+    "acceptance_criteria": [
+      "All relevant tests pass.",
+      "No files outside the allowed paths are modified."
+    ]
+  },
+  "constraints": {
+    "allowed_write_paths": [
+      "src/**",
+      "tests/**",
+      "docs/**"
+    ],
+    "forbidden_command_patterns": [
+      "rm\\s+-rf"
+    ]
+  },
+  "repo": {
+    "validation_command_patterns": [
+      "(?:^|\\s)pytest(?:\\s|$)",
+      "(?:^|\\s)(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?test(?:\\s|$)"
+    ]
+  }
+}
