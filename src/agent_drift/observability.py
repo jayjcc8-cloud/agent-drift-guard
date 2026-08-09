@@ -39,6 +39,8 @@ class JsonlExporter:
         payload = observation.model_dump_json(exclude_none=True).encode("utf-8") + b"\n"
         descriptor = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
         try:
+            if os.name != "nt":
+                os.fchmod(descriptor, 0o600)
             written = os.write(descriptor, payload)
             if written != len(payload):
                 raise OSError(f"short telemetry write: {written} of {len(payload)} bytes")

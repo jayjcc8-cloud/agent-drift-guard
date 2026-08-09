@@ -216,20 +216,25 @@ class HookInstaller:
             if temporary.exists():
                 temporary.unlink()
 
-    def _ensure_anchors(self, source: str | Path | None) -> None:
+    def _load_anchors(self, source: str | Path | None) -> GuardAnchors:
         destination = self.data_root / "anchors.json"
-        if source is None and destination.exists():
-            return
-        if source is None:
-            anchors = GuardAnchors(
+        try:
+            if source is not None:
+                return GuardAnchors.model_validate_json(
+                    Path(source).expanduser().read_text(encoding="utf-8")
+                )
+            if destination.exists():
+                return GuardAnchors.model_validate_json(destination.read_text(encoding="utf-8"))
+            return GuardAnchors(
                 task=TaskAnchor(
                     goal="Keep work aligned with the current user task and validate changes."
                 )
             )
-        else:
-            anchors = GuardAnchors.model_validate_json(
-                Path(source).expanduser().read_text(encoding="utf-8")
-            )
+        except (OSError, ValueError) as exc:
+            raise HookInstallError(f"invalid anchors configuration: {exc}") from exc
+
+    def _write_anchors(self, anchors: GuardAnchors) -> None:
+        destination = self.data_root / "anchors.json"
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         destination.write_text(anchors.model_dump_json(indent=2), encoding="utf-8")
         os.chmod(destination, 0o600)
@@ -253,14 +258,18 @@ class HookInstaller:
         updated, installed = self._merged_config(install=True)
         current = self._read_config()
         changed = updated != current
+        anchors_document = self._load_anchors(anchors)
+        write_anchors = anchors is not None or not (self.data_root / "anchors.json").exists()
         backup: Path | None = None
         gitignore_updated = False
-        if changed and not dry_run:
-            backup = self._backup()
-            self._write_config(updated)
         if not dry_run:
-            self._ensure_anchors(anchors)
+            if changed:
+                backup = self._backup()
             gitignore_updated = self._ensure_gitignore()
+            if write_anchors:
+                self._write_anchors(anchors_document)
+            if changed:
+                self._write_config(updated)
         return HookInstallResult(
             platform=self.platform,
             action="install-dry-run" if dry_run else "install",

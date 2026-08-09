@@ -96,6 +96,8 @@ def write_replay_cases(cases: Iterable[ReplayCase], path: str | Path) -> int:
         0o600,
     )
     try:
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o600)
         encoded = payload.encode("utf-8")
         written = os.write(descriptor, encoded)
         if written != len(encoded):

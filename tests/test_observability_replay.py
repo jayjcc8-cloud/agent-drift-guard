@@ -36,6 +36,7 @@ def native_event(index: int) -> dict[str, object]:
 
 def test_jsonl_observations_round_trip_into_deterministic_replay(tmp_path: Path) -> None:
     observations = tmp_path / "observations.jsonl"
+    observations.touch(mode=0o644)
     anchors = GuardAnchors(task=TaskAnchor(goal="Implement and validate the requested change."))
     runtime = AgentDriftRuntime(
         CodexAdapter(),
@@ -92,6 +93,8 @@ def test_sqlite_session_exports_private_replay_cases(tmp_path: Path) -> None:
     for index in range(3):
         runtime.handle(native_event(index), timestamp=NOW)
     output = tmp_path / "exports" / "session.jsonl"
+    output.parent.mkdir()
+    output.touch(mode=0o644)
     result = export_store_session(store, "real-long-session", output)
     assert result.events == 3
     assert result.expected_decisions == 3

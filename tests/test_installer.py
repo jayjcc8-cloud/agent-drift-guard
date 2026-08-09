@@ -99,3 +99,15 @@ def test_installer_rejects_config_symlink_outside_project(tmp_path: Path) -> Non
     (project / ".codex").symlink_to(outside, target_is_directory=True)
     with pytest.raises(HookInstallError, match="outside project root"):
         HookInstaller("codex", project, executable=executable(tmp_path))
+
+
+def test_invalid_anchors_do_not_activate_hook_configuration(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    invalid = tmp_path / "invalid-anchors.json"
+    invalid.write_text('{"task": {}}', encoding="utf-8")
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    with pytest.raises(HookInstallError, match="invalid anchors"):
+        installer.install(anchors=invalid)
+    assert not installer.config_path.exists()
+    assert not (project / ".gitignore").exists()
