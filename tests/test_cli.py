@@ -1,9 +1,11 @@
 import io
 import json
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from agent_drift.cli import main
 from agent_drift.protocol.events import AgentEvent, EventType
@@ -204,6 +206,115 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["iterations"], 1)
         self.assertFalse(result["budget_exceeded"])
         self.assertGreater(result["latency"]["minimum_ms"], 0)
+
+    def test_hook_telemetry_can_be_replayed_from_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = Path(__file__).resolve().parents[1]
+            database = root / "drift.db"
+            telemetry = root / "observations.jsonl"
+            common = [
+                "--database",
+                str(database),
+                "--anchors",
+                str(project / "examples/anchors.json"),
+                "--telemetry-jsonl",
+                str(telemetry),
+            ]
+            with redirect_stdout(io.StringIO()):
+                hook_code = main(
+                    [
+                        "hook",
+                        "codex",
+                        str(project / "tests/fixtures/codex/pre_tool_use.json"),
+                        *common,
+                    ]
+                )
+            self.assertEqual(hook_code, 0)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                replay_code = main(
+                    [
+                        "replay",
+                        str(telemetry),
+                        "--anchors",
+                        str(project / "examples/anchors.json"),
+                        "--summary-only",
+                        "--fail-on-mismatch",
+                    ]
+                )
+            self.assertEqual(replay_code, 0)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["mismatches"], 0)
+            self.assertNotIn("entries", report)
+
+    def test_install_status_and_uninstall_hooks_from_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                install_code = main(
+                    [
+                        "install-hooks",
+                        "codex",
+                        "--project-root",
+                        str(project),
+                        "--executable",
+                        sys.executable,
+                    ]
+                )
+            self.assertEqual(install_code, 0)
+            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 10)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                status_code = main(
+                    [
+                        "hook-status",
+                        "codex",
+                        "--project-root",
+                        str(project),
+                        "--executable",
+                        sys.executable,
+                    ]
+                )
+            self.assertEqual(status_code, 0)
+            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 10)
+
+            with redirect_stdout(io.StringIO()):
+                uninstall_code = main(
+                    [
+                        "uninstall-hooks",
+                        "codex",
+                        "--project-root",
+                        str(project),
+                        "--executable",
+                        sys.executable,
+                    ]
+                )
+            self.assertEqual(uninstall_code, 0)
+
+    def test_install_uses_current_agent_drift_entrypoint_when_not_on_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            entrypoint = project / "bin" / "agent-drift"
+            entrypoint.parent.mkdir()
+            entrypoint.write_text("#!/bin/sh\n", encoding="utf-8")
+            entrypoint.chmod(0o700)
+            with patch.object(sys, "argv", [str(entrypoint)]), redirect_stdout(io.StringIO()):
+                code = main(
+                    [
+                        "install-hooks",
+                        "codex",
+                        "--project-root",
+                        str(project),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            document = json.loads((project / ".codex/hooks.json").read_text(encoding="utf-8"))
+            command = document["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            self.assertIn(str(entrypoint), command)
 
 
 if __name__ == "__main__":

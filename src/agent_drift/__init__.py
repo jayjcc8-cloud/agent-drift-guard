@@ -12,6 +12,12 @@ from agent_drift.core import (
     Supervisor,
     TaskAnchor,
 )
+from agent_drift.observability import (
+    CompositeExporter,
+    JsonlExporter,
+    ObservationEnvelope,
+    ObservationExporter,
+)
 from agent_drift.protocol.capabilities import (
     Capability,
     CapabilityAssessment,
@@ -26,6 +32,16 @@ from agent_drift.protocol.decisions import (
 )
 from agent_drift.protocol.events import AgentEvent, EventType
 from agent_drift.protocol.versioning import PROTOCOL_VERSION, ProtocolVersion
+from agent_drift.replay import (
+    ReplayCase,
+    ReplayEntry,
+    ReplayExportResult,
+    ReplayReport,
+    export_store_session,
+    load_replay_cases,
+    run_replay,
+    write_replay_cases,
+)
 from agent_drift.runtime import AgentDriftRuntime, RuntimeOutcome
 from agent_drift.store import (
     EventStore,
@@ -44,6 +60,7 @@ __all__ = [
     "CapabilityAssessment",
     "ClaudeCodeAdapter",
     "CodexAdapter",
+    "CompositeExporter",
     "ConstraintAnchor",
     "DecisionAction",
     "DriftEvidence",
@@ -53,6 +70,9 @@ __all__ = [
     "GuardAnchors",
     "GuardDecision",
     "HookResponse",
+    "JsonlExporter",
+    "ObservationEnvelope",
+    "ObservationExporter",
     "PlanAnchor",
     "PlanMilestone",
     "PlatformCapabilities",
@@ -60,6 +80,10 @@ __all__ = [
     "ProtocolVersion",
     "PruneResult",
     "RedactionPolicy",
+    "ReplayCase",
+    "ReplayEntry",
+    "ReplayExportResult",
+    "ReplayReport",
     "RepoAnchor",
     "RetentionPolicy",
     "RuntimeOutcome",
@@ -69,4 +93,8 @@ __all__ = [
     "SupervisionResult",
     "Supervisor",
     "TaskAnchor",
+    "export_store_session",
+    "load_replay_cases",
+    "run_replay",
+    "write_replay_cases",
 ]

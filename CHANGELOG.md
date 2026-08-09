@@ -4,9 +4,15 @@ This project follows semantic versioning for the Python package and documents op
 
 ## Unreleased
 
-- Long-session replay pipeline.
-- Observability exporters.
-- Idempotent Codex and Claude Code Hook installer.
+- OTLP/HTTP export mapping and diagnostics bundle.
+
+## 0.5.0 - 2026-08-09
+
+- Added sanitized long-session observation capture and SQLite session replay export.
+- Added deterministic replay reports, semantic fingerprints, and decision mismatch exit status.
+- Added JSONL observability envelopes and best-effort runtime exporting.
+- Added idempotent install, status, backup, and uninstall commands for Codex and Claude Code Hooks.
+- Added open-source governance files, CI, security guidance, and public roadmap.
 
 ## 0.4.0 - 2026-08-08
 
