@@ -46,11 +46,11 @@ detector -> platform hook schema
 
 ## 下一阶段的进入条件
 
-当前阶段已经完成 Codex/Claude Adapter、双平台等价 fixture、决策回译和确定性 Supervisor。
-SQLite 跨进程状态已经完成。进入语义判断与长期运行前，仍应完成：
+当前阶段已经完成 Codex/Claude Adapter、双平台等价 fixture、决策回译、确定性 Supervisor、SQLite
+跨进程状态和有界本地可观测性。下一阶段按以下门禁推进：
 
-- 在真实 Codex/Claude 会话中采集脱敏 replay fixture，作为官方文档 fixture 的补充；
-- Adapter 决策映射矩阵扩展到 PermissionRequest、TaskCompleted 等协议 v0.2 事件；
-- Detector 阈值配置、抑制机制和长 session 基准测试。
-- 在真实长期会话中验证 v2 保留和脱敏策略，并补充可观测性 exporter。
+- 扩展经过人工隐私审查的真实长会话语料，并建立 Detector 误报/漏报质量指标；
+- 持续验证 replay 截断、JSONL 轮转、自动保留和 exporter failure counter；
+- 在现有 PermissionRequest、TaskCompleted、StopFailure 覆盖基础上追随平台协议变化；
+- 真实语料质量门通过后实现 OTLP/HTTP exporter；
 - 仅在目标机器基准持续显著超出延迟预算时实现可选 Unix socket daemon。

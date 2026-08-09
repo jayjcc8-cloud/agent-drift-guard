@@ -4,7 +4,20 @@ This project follows semantic versioning for the Python package and documents op
 
 ## Unreleased
 
-- OTLP/HTTP export mapping and diagnostics bundle.
+## 0.6.0 - 2026-08-09
+
+- Stream replay input and write replay data atomically, expose truncated SQLite exports, and compare full deterministic
+  decision/evidence semantics in addition to actions.
+- Evaluate manually labeled replay cases with exact match, clean false-positive rate, precision, recall, and F1;
+  make mismatch gating cover action, semantic, and label regressions.
+- Rotate bounded JSONL telemetry, persist exporter failure counters, and expose `telemetry-status`.
+- Cover Codex/Claude `PermissionRequest` plus Claude `TaskCompleted` and `StopFailure` in native Adapter
+  contract tests and project Hook installation; emit Event Protocol v0.2 while retaining v0.1 replay reads.
+- Keep machine-specific Hook runners and Claude settings private while leaving shareable config free of
+  absolute executable and project paths.
+- Apply the default 30-day/5000-event retention policy automatically at most once per day and migrate
+  SQLite stores to schema v3.
+- Include telemetry writes in the default cold-process benchmark and validate both real local CLIs.
 
 ## 0.5.0 - 2026-08-09
 

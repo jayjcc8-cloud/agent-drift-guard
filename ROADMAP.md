@@ -6,11 +6,19 @@
 - JSONL observability exporter with stable result envelopes.
 - Idempotent project-level Hook install, status, and uninstall for Codex and Claude Code.
 
-## v0.6 — Integrations (next)
+## v0.6 — Reliability and integration (complete)
 
-- OTLP/HTTP export after the telemetry envelope is exercised in real sessions.
+- Quality-gated sanitized real-session replay and deterministic semantic regression checks.
+- Bounded replay/JSONL storage, automatic retention, exporter health and schema v3 migration.
+- Codex/Claude protocol matrix coverage for permission, task completion and terminal failure events.
+- Private, project-local Hook runners with shareable configuration free of machine paths.
+
+## v0.7 — Evidence-led integrations
+
+- Expand privacy-reviewed, drift-positive real-session fixtures before adding new integrations.
+- OTLP/HTTP export only after telemetry semantics pass the real-session quality gate.
+- One-command diagnostics bundle only with an explicit privacy contract.
 - Optional Unix socket daemon only when target-machine p95 is materially over budget.
-- One-command diagnostics bundle with privacy review.
 
 ## Later
 

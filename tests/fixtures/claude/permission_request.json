@@ -1,0 +1,13 @@
+{
+  "session_id": "session-contract",
+  "prompt_id": "turn-7",
+  "transcript_path": "/project/.claude/transcript.jsonl",
+  "cwd": "/project",
+  "permission_mode": "default",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git push origin main",
+    "description": "Push the current branch"
+  }
+}

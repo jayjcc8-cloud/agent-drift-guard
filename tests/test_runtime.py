@@ -72,3 +72,34 @@ def test_claude_runtime_preserves_history_across_hooks() -> None:
     assert outcome.response.applied_action == "continue"
     assert outcome.response.stdout is not None
     assert outcome.response.stdout["decision"] == "block"
+
+
+def test_claude_task_completion_is_blocked_until_validation_succeeds() -> None:
+    anchors = GuardAnchors(task=TaskAnchor(goal="Implement feature and validate it."))
+    runtime = AgentDriftRuntime(ClaudeCodeAdapter(), Supervisor(anchors))
+    runtime.handle(
+        {
+            "session_id": "s-task",
+            "cwd": "/project",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_use_id": "write-task",
+            "tool_input": {"file_path": "/project/src/app.py", "content": "changed"},
+        },
+        timestamp=NOW,
+        repo_root="/project",
+    )
+    outcome = runtime.handle(
+        {
+            "session_id": "s-task",
+            "cwd": "/project",
+            "hook_event_name": "TaskCompleted",
+            "task_id": "task-1",
+            "task_subject": "Implement feature",
+        },
+        timestamp=NOW,
+        repo_root="/project",
+    )
+    assert outcome.supervision.decision.action.value == "continue"
+    assert outcome.response.exit_code == 2
+    assert "validation" in outcome.response.stderr.lower()

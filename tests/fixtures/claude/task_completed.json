@@ -1,0 +1,12 @@
+{
+  "session_id": "session-contract",
+  "transcript_path": "/project/.claude/transcript.jsonl",
+  "cwd": "/project",
+  "permission_mode": "default",
+  "hook_event_name": "TaskCompleted",
+  "task_id": "task-001",
+  "task_subject": "Implement runtime guard",
+  "task_description": "Implement and validate the runtime guard",
+  "teammate_name": "implementer",
+  "team_name": "session-team"
+}

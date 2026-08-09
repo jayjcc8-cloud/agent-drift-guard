@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-drift-guard"
-version = "0.5.0"
+version = "0.6.0"
 description = "Platform-neutral runtime supervision contracts for AI coding agents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,8 @@ keywords = ["ai-agents", "codex", "claude-code", "runtime-supervision", "hooks"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",

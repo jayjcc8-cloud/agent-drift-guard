@@ -40,7 +40,7 @@ def test_codex_install_is_idempotent_and_preserves_existing_hooks(tmp_path: Path
     installer = HookInstaller("codex", project, executable=executable(tmp_path))
     result = installer.install()
     assert result.changed is True
-    assert len(result.installed_events) == 10
+    assert len(result.installed_events) == 11
     assert result.backup_path is not None
     assert Path(result.backup_path).exists()
     document = json.loads(config.read_text(encoding="utf-8"))
@@ -49,7 +49,10 @@ def test_codex_install_is_idempotent_and_preserves_existing_hooks(tmp_path: Path
     assert pre_tool_groups[0]["hooks"][0]["command"] == "echo existing"
     command = pre_tool_groups[1]["hooks"][0]["command"]
     assert "AGENT_DRIFT_GUARD=1" in command
-    assert "'" in command  # paths containing spaces are shell quoted
+    assert str(installer.executable) not in command
+    assert "git rev-parse --show-toplevel" in command
+    assert str(installer.executable) in installer.runner_path.read_text(encoding="utf-8")
+    assert installer.runner_path.stat().st_mode & 0o777 == 0o700
     assert (project / ".agent-drift/anchors.json").exists()
     assert ".agent-drift/" in (project / ".gitignore").read_text(encoding="utf-8")
     assert result.gitignore_updated is True
@@ -69,15 +72,19 @@ def test_codex_install_is_idempotent_and_preserves_existing_hooks(tmp_path: Path
 
 def test_claude_install_preserves_non_hook_settings(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    config = project / ".claude/settings.json"
+    config = project / ".claude/settings.local.json"
     config.parent.mkdir(parents=True)
     config.write_text(json.dumps({"permissions": {"allow": ["Read"]}}), encoding="utf-8")
     installer = HookInstaller("claude-code", project, executable=executable(tmp_path))
     result = installer.install()
-    assert len(result.installed_events) == 11
+    assert len(result.installed_events) == 14
     document = json.loads(config.read_text(encoding="utf-8"))
     assert document["permissions"] == {"allow": ["Read"]}
     assert "PostToolUseFailure" in document["hooks"]
+    assert "PermissionRequest" in document["hooks"]
+    assert "TaskCompleted" in document["hooks"]
+    assert "StopFailure" in document["hooks"]
+    assert ".claude/settings.local.json" in (project / ".gitignore").read_text(encoding="utf-8")
 
 
 def test_install_dry_run_does_not_touch_project(tmp_path: Path) -> None:

@@ -16,7 +16,11 @@ class ValidationDetector(Detector):
 
     def detect(self, context: DetectionContext) -> tuple[DriftEvidence, ...]:
         event = context.event
-        if event.event_type not in {EventType.AGENT_STOP, EventType.SUBAGENT_STOP}:
+        if event.event_type not in {
+            EventType.AGENT_STOP,
+            EventType.SUBAGENT_STOP,
+            EventType.TASK_COMPLETED,
+        }:
             return ()
         last_write = latest_write_index(context.history)
         if last_write is None:

@@ -14,8 +14,9 @@ Codex 和 Claude Code 的 command Hook 通常每次启动一个新进程。仅�
 | `events` | 完整规范化 `AgentEvent` | `event_id`、`(session_id, sequence)` 唯一 |
 | `evidence` | 每个 Detector 的独立证据 | `evidence_id`、`(event_id, ordinal)` 唯一 |
 | `decisions` | 最终统一决策 | 每个 event 最多一个 decision |
+| `maintenance` | 自动保留等维护任务时间 | 每个维护 key 唯一 |
 
-数据库使用 schema `user_version=2`、foreign keys、WAL、`synchronous=NORMAL` 和 busy timeout。首次创建
+数据库使用 schema `user_version=3`、foreign keys、WAL、`synchronous=NORMAL` 和 busy timeout。首次创建
 时目录权限请求为 `0700`、数据库文件请求为 `0600`。
 
 ## 原子处理语义
@@ -85,7 +86,8 @@ agent-drift hook claude-code - \
 }
 ```
 
-Claude Code 使用相同命令结构，将 platform 参数改为 `claude-code` 并放入 `.claude/settings.json`。
+Claude Code 使用相同命令结构，将 platform 参数改为 `claude-code` 并放入
+`.claude/settings.local.json`。
 生产配置还应覆盖 `UserPromptSubmit`、compaction、subagent 和 session 生命周期事件。
 
 ## 隐私与运维边界
@@ -94,6 +96,9 @@ Claude Code 使用相同命令结构，将 platform 参数改为 `claude-code` �
 业务敏感信息，仍应把数据库放在用户私有目录、排除版本控制并限制备份范围。`store-stats` 会运行
 `PRAGMA integrity_check`，但不会删除或修复数据。策略配置、保留清理和迁移语义见
 [脱敏、保留与迁移](privacy-retention.md)。
+
+默认 30 天/每 session 5000 事件的策略在 Hook 打开 Store 时至多每日自动运行一次，不需要本地
+daemon。只读/维护 CLI 不触发打开时清理；显式 `store-prune` 仍可用于预览、临时收紧或立即执行。
 
 Adapter 当前为每次 native delivery 生成新的随机 `event_id`。只有上层重试复用同一个 AgentEvent 时
 才获得 ID 级幂等；平台重复投递同一原始 Hook 仍可能记录为两个事件。未来可在平台提供稳定 delivery

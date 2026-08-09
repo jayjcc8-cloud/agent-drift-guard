@@ -41,7 +41,7 @@ class ScopeDetector(Detector):
         event = context.event
         allowed = context.anchors.constraints.allowed_write_paths
         if (
-            event.event_type != EventType.TOOL_BEFORE
+            event.event_type not in {EventType.TOOL_BEFORE, EventType.PERMISSION_REQUEST}
             or payload_string(event, "tool") not in WRITE_TOOLS
             or not allowed
         ):

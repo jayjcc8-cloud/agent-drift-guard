@@ -42,6 +42,9 @@ class EventStore(Protocol):
     ) -> tuple[AgentEvent, ...]:
         """Load an ascending, bounded session history."""
 
+    def count_session_events(self, session_id: str) -> int:
+        """Return the total number of persisted events for one session."""
+
     def get_result(self, event_id: UUID) -> SupervisionResult | None:
         """Load a completed supervision result if one exists."""
 

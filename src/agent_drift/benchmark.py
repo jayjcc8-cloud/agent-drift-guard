@@ -26,6 +26,7 @@ class LatencySummary(WireModel):
 
 class HookBenchmarkResult(WireModel):
     platform: str
+    telemetry_enabled: bool
     iterations: int = Field(ge=1)
     warmup_iterations: int = Field(ge=0)
     budget_ms: float = Field(gt=0)
@@ -67,6 +68,7 @@ def run_hook_benchmark(
     iterations: int = 30,
     warmup_iterations: int = 3,
     budget_ms: float = 75.0,
+    include_telemetry: bool = True,
 ) -> HookBenchmarkResult:
     if iterations < 1 or warmup_iterations < 0 or budget_ms <= 0:
         raise ValueError("invalid benchmark iterations or latency budget")
@@ -86,6 +88,7 @@ def run_hook_benchmark(
     with tempfile.TemporaryDirectory(prefix="agent-drift-benchmark-") as directory:
         temporary_root = Path(directory)
         database = Path(database_path) if database_path else temporary_root / "benchmark.db"
+        telemetry = temporary_root / "observations.jsonl"
         total = warmup_iterations + iterations
         for index in range(total):
             document = dict(source_document)
@@ -108,6 +111,8 @@ def run_hook_benchmark(
                 command.extend(("--repo-root", repo_root))
             if redaction_policy_path:
                 command.extend(("--redaction-policy", str(Path(redaction_policy_path).resolve())))
+            if include_telemetry:
+                command.extend(("--telemetry-jsonl", str(telemetry)))
             started = perf_counter_ns()
             completed = subprocess.run(
                 command,
@@ -127,6 +132,7 @@ def run_hook_benchmark(
     latency = summarize_latency(samples_ms)
     return HookBenchmarkResult(
         platform=platform,
+        telemetry_enabled=include_telemetry,
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         budget_ms=budget_ms,

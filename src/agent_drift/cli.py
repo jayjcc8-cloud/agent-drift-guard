@@ -19,7 +19,7 @@ from agent_drift.observability import JsonlExporter
 from agent_drift.protocol.capabilities import PlatformCapabilities
 from agent_drift.protocol.decisions import GuardDecision
 from agent_drift.protocol.events import AgentEvent
-from agent_drift.replay import export_store_session, load_replay_cases, run_replay
+from agent_drift.replay import export_store_session, iter_replay_cases, run_replay
 from agent_drift.runtime import AgentDriftRuntime
 from agent_drift.store import RedactionPolicy, RetentionPolicy, SQLiteStore
 
@@ -117,6 +117,15 @@ def _parser() -> argparse.ArgumentParser:
     hook.add_argument("--platform-version")
     hook.add_argument("--redaction-policy", help="optional RedactionPolicy JSON file")
     hook.add_argument("--telemetry-jsonl", help="append sanitized observations as JSONL")
+    hook.add_argument("--telemetry-max-bytes", type=int, default=32 * 1024 * 1024)
+    hook.add_argument("--telemetry-backups", type=int, default=3)
+    hook.add_argument("--telemetry-max-record-bytes", type=int, default=1024 * 1024)
+
+    telemetry_status = subparsers.add_parser(
+        "telemetry-status", help="inspect local JSONL exporter size and failure health"
+    )
+    telemetry_status.add_argument("path")
+    telemetry_status.add_argument("--backup-count", type=int, default=3)
 
     benchmark = subparsers.add_parser(
         "benchmark-hook", help="measure full command Hook process latency"
@@ -130,6 +139,9 @@ def _parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--iterations", type=int, default=30)
     benchmark.add_argument("--warmup", type=int, default=3)
     benchmark.add_argument("--budget-ms", type=float, default=75.0)
+    benchmark.add_argument(
+        "--no-telemetry", action="store_true", help="exclude JSONL export from the benchmark"
+    )
 
     replay = subparsers.add_parser(
         "replay", help="re-run sanitized long-session observations deterministically"
@@ -138,6 +150,11 @@ def _parser() -> argparse.ArgumentParser:
     replay.add_argument("--anchors", required=True)
     replay.add_argument("--output", help="optional report JSON path")
     replay.add_argument("--summary-only", action="store_true")
+    replay.add_argument(
+        "--assume-clean",
+        action="store_true",
+        help="label every replay event as expected to have no drift evidence",
+    )
     replay.add_argument("--fail-on-mismatch", action="store_true")
 
     for name, action in (
@@ -160,12 +177,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command in {"store-init", "store-stats"}:
-            store = SQLiteStore(args.database)
+            store = SQLiteStore(args.database, retention_policy=None)
             output = store.stats().model_dump(mode="json")
             output["integrity"] = store.integrity_check()
             print(json.dumps(output, ensure_ascii=False, indent=2))
         elif args.command == "store-events":
-            store = SQLiteStore(args.database)
+            store = SQLiteStore(args.database, retention_policy=None)
             events = store.load_history(args.session_id, limit=args.limit)
             print(
                 json.dumps(
@@ -176,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "store-export-replay":
             export_result = export_store_session(
-                SQLiteStore(args.database),
+                SQLiteStore(args.database, retention_policy=None),
                 args.session_id,
                 args.output,
                 limit=args.limit,
@@ -185,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "store-prune":
             max_age = None if args.no_age_limit else timedelta(days=args.max_age_days)
             max_events = None if args.no_count_limit else args.max_events_per_session
-            prune_result = SQLiteStore(args.database).prune(
+            prune_result = SQLiteStore(args.database, retention_policy=None).prune(
                 RetentionPolicy(
                     max_age=max_age,
                     max_events_per_session=max_events,
@@ -207,7 +224,16 @@ def main(argv: list[str] | None = None) -> int:
                     anchors,
                     store=SQLiteStore(args.database, redaction_policy=redaction_policy),
                 ),
-                exporter=JsonlExporter(args.telemetry_jsonl) if args.telemetry_jsonl else None,
+                exporter=(
+                    JsonlExporter(
+                        args.telemetry_jsonl,
+                        max_bytes=args.telemetry_max_bytes,
+                        backup_count=args.telemetry_backups,
+                        max_record_bytes=args.telemetry_max_record_bytes,
+                    )
+                    if args.telemetry_jsonl
+                    else None
+                ),
             )
             outcome = runtime.handle(
                 _read_json(args.path),
@@ -223,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
             return outcome.response.exit_code
+        elif args.command == "telemetry-status":
+            _write_model(JsonlExporter(args.path, backup_count=args.backup_count).status())
         elif args.command == "benchmark-hook":
             benchmark_result = run_hook_benchmark(
                 platform=args.platform,
@@ -234,14 +262,19 @@ def main(argv: list[str] | None = None) -> int:
                 iterations=args.iterations,
                 warmup_iterations=args.warmup,
                 budget_ms=args.budget_ms,
+                include_telemetry=not args.no_telemetry,
             )
             _write_model(benchmark_result)
         elif args.command == "replay":
             anchors = GuardAnchors.model_validate(_read_json(args.anchors))
+            cases = iter_replay_cases(args.path)
+            if args.assume_clean:
+                cases = (case.model_copy(update={"expected_drift_types": ()}) for case in cases)
             replay_report = run_replay(
-                load_replay_cases(args.path),
+                cases,
                 anchors,
                 source=str(Path(args.path).resolve()),
+                include_entries=not args.summary_only,
             )
             document = replay_report.model_dump(mode="json", exclude_none=True)
             if args.summary_only:
@@ -251,7 +284,11 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.output).write_text(replay_output + "\n", encoding="utf-8")
             else:
                 print(replay_output)
-            if args.fail_on_mismatch and replay_report.mismatches:
+            if args.fail_on_mismatch and (
+                replay_report.mismatches
+                or replay_report.semantic_mismatches
+                or replay_report.quality.label_mismatches
+            ):
                 return 1
         elif args.command in {"install-hooks", "hook-status", "uninstall-hooks"}:
             executable = args.executable

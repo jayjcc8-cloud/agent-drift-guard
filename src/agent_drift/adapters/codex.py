@@ -17,6 +17,7 @@ _CODEX_HOOKS = frozenset(
     {
         "SessionStart",
         "UserPromptSubmit",
+        "PermissionRequest",
         "PreToolUse",
         "PostToolUse",
         "PreCompact",
@@ -40,7 +41,7 @@ class CodexAdapter(PlatformAdapter):
         return PlatformCapabilities(
             platform="codex",
             platform_version=self._platform_version,
-            adapter_version="0.5.0",
+            adapter_version="0.6.0",
             capabilities=frozenset(
                 {
                     Capability.OBSERVE_SESSION,

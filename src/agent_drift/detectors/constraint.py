@@ -16,7 +16,7 @@ class ConstraintDetector(Detector):
 
     def detect(self, context: DetectionContext) -> tuple[DriftEvidence, ...]:
         event = context.event
-        if event.event_type != EventType.TOOL_BEFORE:
+        if event.event_type not in {EventType.TOOL_BEFORE, EventType.PERMISSION_REQUEST}:
             return ()
         tool = payload_string(event, "tool")
         constraints = context.anchors.constraints
