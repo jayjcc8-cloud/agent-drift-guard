@@ -4,6 +4,20 @@ This project follows semantic versioning for the Python package and documents op
 
 ## Unreleased
 
+## 0.7.0 - 2026-08-09
+
+- Add eight privacy-reviewed, real controlled Codex 0.147.0 and Claude Code 2.1.98 replay cases with
+  forty manually labeled events across clean, repeated-failure, failed-validation, subagent, and
+  compaction scenarios.
+- Enforce corpus provenance, minimization, privacy, deterministic action/semantic replay, exact label
+  match, clean false-positive, positive recall, and cross-platform parity in CI.
+- Normalize plain-text Codex and stream-only Claude unittest results from their deterministic terminal
+  status lines, eliminating clean-session validation false positives without broad output heuristics.
+- Ignore Claude's display-only Bash `description` field in LoopDetector fingerprints so changing attempt
+  labels cannot hide repeated identical execution.
+- Publish baseline and corrected Detector quality metrics while deferring statistical thresholds until
+  the public corpus reaches at least fifty labeled events.
+
 ## 0.6.0 - 2026-08-09
 
 - Stream replay input and write replay data atomically, expose truncated SQLite exports, and compare full deterministic

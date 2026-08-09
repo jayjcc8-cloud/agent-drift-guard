@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "corpus_version": "v0.7",
+  "case_id": "claude-validation",
+  "platform": "claude-code",
+  "platform_version": "2.1.98",
+  "scenario": "validation",
+  "source_kind": "real-controlled-session",
+  "raw_capture_sha256": "eb8ac9500bf0865b2402ecef1c4bd5af367a2f0918a841c103d82b67b2768d11",
+  "event_count": 5,
+  "expected_decision_counts": {"allow": 4, "continue": 1},
+  "expected_drift_event_counts": {"validation_drift": 1, "state_drift": 1},
+  "human_labels_reviewed": true,
+  "privacy_review": {"status":"passed","raw_data_committed":false,"prompts_removed":true,"tool_outputs_removed":true,"transcript_paths_removed":true,"credentials_found":false,"reviewed_on":"2026-08-09"},
+  "documented_platform_differences": ["Claude represented the failed command as tool.error rather than tool.after."]
+}

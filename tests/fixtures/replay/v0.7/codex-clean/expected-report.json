@@ -1,0 +1,118 @@
+{
+  "schema_version": "0.2",
+  "source": "tests/fixtures/replay/v0.7/codex-clean/replay.jsonl",
+  "anchors_fingerprint": "56e92ee6af3d5fe80a3a0b753d66b03cb833b986e3c7e223e49bc63e3e69a045",
+  "history_limit": 500,
+  "protocol_versions": [
+    "0.2"
+  ],
+  "total_events": 6,
+  "sessions": 1,
+  "decision_counts": {
+    "allow": 6
+  },
+  "evidence_counts": {},
+  "compared_events": 6,
+  "mismatches": 0,
+  "semantic_compared_events": 6,
+  "semantic_mismatches": 0,
+  "quality": {
+    "labeled_events": 6,
+    "exact_matches": 6,
+    "label_mismatches": 0,
+    "exact_match_rate": 1.0,
+    "clean_events": 6,
+    "clean_false_positive_events": 0,
+    "clean_false_positive_rate": 0.0,
+    "true_positives": 0,
+    "false_positives": 0,
+    "false_negatives": 0
+  },
+  "semantic_fingerprint": "ce615169f2b22f07471fc5a4ac3efbca7c6012ff5bdbb3d79286ec662af45476",
+  "entries": [
+    {
+      "index": 0,
+      "event_id": "00000000-0000-4000-8000-000000000101",
+      "session_id": "fixture-codex-clean",
+      "event_type": "session.start",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 1,
+      "event_id": "00000000-0000-4000-8000-000000000102",
+      "session_id": "fixture-codex-clean",
+      "event_type": "tool.before",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 2,
+      "event_id": "00000000-0000-4000-8000-000000000103",
+      "session_id": "fixture-codex-clean",
+      "event_type": "tool.after",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 3,
+      "event_id": "00000000-0000-4000-8000-000000000104",
+      "session_id": "fixture-codex-clean",
+      "event_type": "tool.before",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 4,
+      "event_id": "00000000-0000-4000-8000-000000000105",
+      "session_id": "fixture-codex-clean",
+      "event_type": "tool.after",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 5,
+      "event_id": "00000000-0000-4000-8000-000000000106",
+      "session_id": "fixture-codex-clean",
+      "event_type": "agent.stop",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    }
+  ]
+}

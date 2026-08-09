@@ -9,8 +9,9 @@ Adapter 是唯一知道平台 Hook 字段和输出形状的模块。Core 只接�
 - [Claude Code Hooks reference](https://code.claude.com/docs/en/hooks)
 
 本地开发机检测到 `codex-cli 0.147.0` 与 Claude Code `2.1.98`。契约 fixture 采用官方文档当前 wire
-schema，并已让两个真实 CLI 加载安装器生成的项目 Hook。Codex 完成了真实命令会话；Claude 真实
-触发启动、提交、结束和凭据失败路径，模型请求受本机可用凭据限制。
+schema，并已让两个真实 CLI 加载安装器生成的项目 Hook。v0.7 的两个客户端都完成了正常编辑验证、
+重复失败、失败验证后完成声明、子 Agent 与上下文压缩真实会话；公开最小化语料和质量结果见
+[v0.7 真实语料与 Detector 证据门](replay-corpus.md)。
 
 ## 输入规范化
 
@@ -32,6 +33,10 @@ Claude 的 `PostToolUseFailure` 额外映射为 `tool.error`，`TaskCompleted` �
 `StopFailure` 映射为只观察的 `agent.error`。Codex 的非零 Bash 结果仍从
 `PostToolUse` 到达，因此保留为 `tool.after`，并通过规范化的 `payload.outcome` 表示成功/失败；
 不能伪造一个平台没有发出的 Hook 名。
+
+真实 CLI 还证明 Bash 结果不总含结构化退出码：Codex 可能给出纯文本，Claude 可能只给
+`stdout/stderr`。Adapter 只在独立 unittest 终止行是 `OK` 或 `FAILED (...)` 时推导 outcome；其他
+无退出码文本保持 `unknown`，避免以模糊关键词猜测执行状态。
 
 三个新增统一事件使用 Event Protocol v0.2；Supervisor 继续接受 v0.1 历史事件，避免切断既有 replay。
 Decision 与 Capabilities 仍使用各自的 v0.1 contract。

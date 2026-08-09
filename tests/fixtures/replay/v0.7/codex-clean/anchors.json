@@ -1,0 +1,12 @@
+{
+  "task": {
+    "goal": "Correct the controlled calculator and validate the change.",
+    "acceptance_criteria": ["The requested unittest command succeeds before completion."]
+  },
+  "constraints": {
+    "allowed_write_paths": ["calc.py"]
+  },
+  "repo": {
+    "validation_command_patterns": ["(?:^|\\s)python3\\s+-m\\s+unittest(?:\\s|$)"]
+  }
+}

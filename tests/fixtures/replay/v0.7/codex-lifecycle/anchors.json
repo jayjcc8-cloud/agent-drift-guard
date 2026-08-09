@@ -1,0 +1,8 @@
+{
+  "task": {
+    "goal": "Inspect the controlled calculator through one subagent and compact context.",
+    "acceptance_criteria": ["Subagent and compaction lifecycle events remain clean."]
+  },
+  "constraints": {"allowed_write_paths": ["calc.py"]},
+  "repo": {"validation_command_patterns": ["(?:^|\\s)python3\\s+-m\\s+unittest(?:\\s|$)"]}
+}

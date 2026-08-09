@@ -1,0 +1,120 @@
+{
+  "schema_version": "0.2",
+  "source": "tests/fixtures/replay/v0.7/codex-validation/replay.jsonl",
+  "anchors_fingerprint": "9f978a5fde1d5555acea2ed0f72696420870904eb2bc2d93de5cb14068eabdb6",
+  "history_limit": 500,
+  "protocol_versions": [
+    "0.2"
+  ],
+  "total_events": 5,
+  "sessions": 1,
+  "decision_counts": {
+    "allow": 4,
+    "continue": 1
+  },
+  "evidence_counts": {
+    "state_drift": 1,
+    "validation_drift": 1
+  },
+  "compared_events": 5,
+  "mismatches": 0,
+  "semantic_compared_events": 5,
+  "semantic_mismatches": 0,
+  "quality": {
+    "labeled_events": 5,
+    "exact_matches": 5,
+    "label_mismatches": 0,
+    "exact_match_rate": 1.0,
+    "clean_events": 4,
+    "clean_false_positive_events": 0,
+    "clean_false_positive_rate": 0.0,
+    "true_positives": 2,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  },
+  "semantic_fingerprint": "f341e5b81cd5c08b82e08167abd82a1c47f742b8a24ff0b80b500d06e7c58259",
+  "entries": [
+    {
+      "index": 0,
+      "event_id": "00000000-0000-4000-8000-000000000301",
+      "session_id": "fixture-codex-validation",
+      "event_type": "tool.before",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 1,
+      "event_id": "00000000-0000-4000-8000-000000000302",
+      "session_id": "fixture-codex-validation",
+      "event_type": "tool.after",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 2,
+      "event_id": "00000000-0000-4000-8000-000000000303",
+      "session_id": "fixture-codex-validation",
+      "event_type": "tool.before",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 3,
+      "event_id": "00000000-0000-4000-8000-000000000304",
+      "session_id": "fixture-codex-validation",
+      "event_type": "tool.after",
+      "expected_action": "allow",
+      "actual_action": "allow",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [],
+      "drift_types_match_expected": true,
+      "drift_types": [],
+      "detectors": []
+    },
+    {
+      "index": 4,
+      "event_id": "00000000-0000-4000-8000-000000000305",
+      "session_id": "fixture-codex-validation",
+      "event_type": "agent.stop",
+      "expected_action": "continue",
+      "actual_action": "continue",
+      "matches_expected": true,
+      "semantic_matches_expected": true,
+      "expected_drift_types": [
+        "validation_drift",
+        "state_drift"
+      ],
+      "drift_types_match_expected": true,
+      "drift_types": [
+        "validation_drift",
+        "state_drift"
+      ],
+      "detectors": [
+        "validation",
+        "state"
+      ]
+    }
+  ]
+}

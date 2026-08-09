@@ -14,6 +14,8 @@ from agent_drift.protocol.events import AgentEvent, EventType
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 _PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+_UNITTEST_FAILURE = re.compile(r"^\s*FAILED(?:\s*\([^\n]*\))?\s*$", re.MULTILINE)
+_UNITTEST_SUCCESS = re.compile(r"^\s*OK(?:\s*\([^\n]*\))?\s*$", re.MULTILINE)
 
 HOOK_EVENT_TYPES: dict[str, EventType] = {
     "SessionStart": EventType.SESSION_START,
@@ -95,9 +97,22 @@ def _extract_paths(tool: str, arguments: JsonValue) -> list[str]:
     return sorted(set(paths))
 
 
+def _infer_unittest_outcome(text: str) -> str | None:
+    if _UNITTEST_FAILURE.search(text):
+        return "failure"
+    if _UNITTEST_SUCCESS.search(text):
+        return "success"
+    return None
+
+
 def _infer_outcome(result: JsonValue, *, error_event: bool) -> str:
     if error_event:
         return "failure"
+    if isinstance(result, str):
+        # Codex 0.147.0 emits Bash PostToolUse responses as plain text. Real
+        # controlled sessions showed unittest's terminal status line is the
+        # only portable success/failure signal in that payload shape.
+        return _infer_unittest_outcome(result) or "unknown"
     if not isinstance(result, dict):
         return "unknown"
     success = result.get("success")
@@ -110,6 +125,16 @@ def _infer_outcome(result: JsonValue, *, error_event: bool) -> str:
     is_error = result.get("is_error")
     if isinstance(is_error, bool):
         return "failure" if is_error else "success"
+    # Claude Code 2.1.98 emits Bash PostToolUse responses as an object with
+    # stdout/stderr but no exit code. unittest writes its terminal status to
+    # either stream depending on the runner configuration.
+    streams = "\n".join(
+        value for key in ("stdout", "stderr") if isinstance((value := result.get(key)), str)
+    )
+    if streams:
+        inferred = _infer_unittest_outcome(streams)
+        if inferred is not None:
+            return inferred
     return "unknown"
 
 

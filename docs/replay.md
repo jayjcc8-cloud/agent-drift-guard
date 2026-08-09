@@ -63,3 +63,5 @@ agent-drift replay .agent-drift/replays/clean-session.jsonl \
 `--assume-clean` 会把每个事件标为零漂移，只适合已逐条审查的会话，不能替代语料标注。
 
 真实会话内容默认永远不应提交到 Git。贡献者只应提交最小化、再次人工审查过的 replay fixture。
+仓库内首个强制执行此约束的公开语料与指标见
+[v0.7 真实语料与 Detector 证据门](replay-corpus.md)。

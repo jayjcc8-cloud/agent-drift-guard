@@ -55,6 +55,7 @@ cat examples/tool-before.json | uv run agent-drift validate-event -
 - [脱敏、保留与迁移](docs/privacy-retention.md)
 - [Hook 延迟基线与 daemon 决策](docs/hook-performance.md)
 - [真实长会话 Replay](docs/replay.md)
+- [v0.7 真实语料与 Detector 证据门](docs/replay-corpus.md)
 - [可观测性 Exporter](docs/observability.md)
 - [一键 Hook 安装](docs/hook-installation.md)
 
@@ -62,7 +63,9 @@ cat examples/tool-before.json | uv run agent-drift validate-event -
 
 已实现协议模型、严格 JSON 校验、能力协商、Codex/Claude Code Adapter、决策回译、Supervisor、
 五个确定性 Detector、SQLite WAL Store、默认写盘前脱敏、每日自动保留、v1→v2→v3 迁移、持久化
-Hook CLI、有界 JSONL、流式 replay、幂等 Hook 安装和跨平台契约测试均已实现。Codex 0.147.0 和
-Claude Code 2.1.98 已在本机执行真实 Hook 接入；Claude 模型调用受本机凭据可用性限制，但真实
-启动、结束和 `StopFailure` 已进入 Store。尚未实现 LLM Judge 和 OTLP/HTTP exporter。daemon 仅在
-目标机器延迟持续达到阶段门时才会实现。
+Hook CLI、有界 JSONL、流式 replay、幂等 Hook 安装和跨平台契约测试均已实现。v0.7 进一步用
+Codex 0.147.0 与 Claude Code 2.1.98 的 8 个受控真实会话建立 40 事件人工标注语料，覆盖正常完成、
+重复失败、失败验证后完成声明、子 Agent 与上下文压缩；当前 Detector 在公开语料上 exact match 为
+100%，clean false-positive rate 为 0%。Constraint/Scope 继续由协议契约测试覆盖；Goal/Plan/Decision
+尚无 Detector。尚未实现 LLM Judge 和 OTLP/HTTP exporter。daemon 仅在目标机器延迟持续达到阶段门
+时才会实现。
