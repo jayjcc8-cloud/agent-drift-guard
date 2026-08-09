@@ -50,6 +50,65 @@ def test_equivalent_native_hooks_produce_equivalent_core_events(fixture: str) ->
     assert semantic_projection(codex) == semantic_projection(claude)
 
 
+def test_permission_request_contract_is_equivalent_and_defers_when_allowed() -> None:
+    codex_adapter = CodexAdapter()
+    claude_adapter = ClaudeCodeAdapter()
+    codex = codex_adapter.adapt_event(
+        load_fixture("codex", "permission_request.json"), timestamp=NOW, repo_root="/project"
+    )
+    claude = claude_adapter.adapt_event(
+        load_fixture("claude", "permission_request.json"), timestamp=NOW, repo_root="/project"
+    )
+    assert semantic_projection(codex) == semantic_projection(claude)
+    assert codex.event_type == EventType.PERMISSION_REQUEST
+    allow = GuardDecision(action=DecisionAction.ALLOW, reason="No drift detected.")
+    assert codex_adapter.render_decision(codex, allow).applied_action == "defer"
+    assert claude_adapter.render_decision(claude, allow).applied_action == "defer"
+
+
+def test_permission_request_block_uses_native_permission_decision() -> None:
+    decision = GuardDecision(action=DecisionAction.BLOCK, reason="Push is outside the task.")
+    for adapter, platform in (
+        (CodexAdapter(), "codex"),
+        (ClaudeCodeAdapter(), "claude"),
+    ):
+        event = adapter.adapt_event(
+            load_fixture(platform, "permission_request.json"), timestamp=NOW
+        )
+        response = adapter.render_decision(event, decision)
+        assert response.stdout == {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {
+                    "behavior": "deny",
+                    "message": "Push is outside the task.",
+                },
+            }
+        }
+
+
+def test_claude_task_completed_and_stop_failure_follow_observation_contracts() -> None:
+    adapter = ClaudeCodeAdapter()
+    completed = adapter.adapt_event(load_fixture("claude", "task_completed.json"), timestamp=NOW)
+    assert completed.event_type == EventType.TASK_COMPLETED
+    response = adapter.render_decision(
+        completed,
+        GuardDecision(action=DecisionAction.CONTINUE, reason="Run validation first."),
+    )
+    assert response.exit_code == 2
+    assert response.stderr == "Run validation first."
+
+    failure = adapter.adapt_event(load_fixture("claude", "stop_failure.json"), timestamp=NOW)
+    assert failure.event_type == EventType.AGENT_ERROR
+    assert failure.payload["error"] == "rate_limit"
+    assert (
+        adapter.render_decision(
+            failure, GuardDecision(action=DecisionAction.ALLOW, reason="Observation only.")
+        ).stdout
+        is None
+    )
+
+
 def test_real_platform_fields_stay_in_namespaced_extensions() -> None:
     event = CodexAdapter().adapt_event(load_fixture("codex", "pre_tool_use.json"), timestamp=NOW)
     assert event.extensions["codex.model"] == "gpt-example"

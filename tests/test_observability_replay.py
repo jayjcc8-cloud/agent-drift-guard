@@ -5,12 +5,17 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from agent_drift import (
     AgentDriftRuntime,
     CodexAdapter,
+    ConstraintAnchor,
+    DriftType,
     GuardAnchors,
     JsonlExporter,
     ObservationEnvelope,
+    ReplayCase,
     SQLiteStore,
     Supervisor,
     TaskAnchor,
@@ -62,6 +67,9 @@ def test_jsonl_observations_round_trip_into_deterministic_replay(tmp_path: Path)
     assert first_report.sessions == 1
     assert first_report.compared_events == 20
     assert first_report.mismatches == 0
+    assert first_report.semantic_compared_events == 20
+    assert first_report.semantic_mismatches == 0
+    assert first_report.anchors_fingerprint
     assert first_report.semantic_fingerprint == second_report.semantic_fingerprint
 
 
@@ -86,6 +94,35 @@ def test_replay_reports_expected_decision_mismatch(tmp_path: Path) -> None:
     assert report.entries[0].matches_expected is False
 
 
+def test_replay_reports_labeled_detector_quality() -> None:
+    anchors = GuardAnchors(
+        task=TaskAnchor(goal="Stay in scope."),
+        constraints=ConstraintAnchor(forbidden_command_patterns=("pytest",)),
+    )
+    runtime = AgentDriftRuntime(CodexAdapter(), Supervisor(anchors))
+    first = runtime.handle(native_event(0), timestamp=NOW).supervision.event
+    second = runtime.handle(native_event(1), timestamp=NOW).supervision.event
+    report = run_replay(
+        (
+            ReplayCase(event=first, expected_drift_types=(DriftType.CONSTRAINT,)),
+            ReplayCase(event=second, expected_drift_types=()),
+        ),
+        anchors,
+    )
+
+    assert report.quality.labeled_events == 2
+    assert report.quality.exact_matches == 1
+    assert report.quality.label_mismatches == 1
+    assert report.quality.clean_false_positive_rate == 1.0
+    assert report.quality.true_positives == 1
+    assert report.quality.false_positives == 1
+    assert report.quality.false_negatives == 0
+    assert report.quality.precision == 0.5
+    assert report.quality.recall == 1.0
+    assert report.entries[0].drift_types_match_expected is True
+    assert report.entries[1].drift_types_match_expected is False
+
+
 def test_sqlite_session_exports_private_replay_cases(tmp_path: Path) -> None:
     anchors = GuardAnchors(task=TaskAnchor(goal="Implement and validate."))
     store = SQLiteStore(tmp_path / "drift.db")
@@ -98,9 +135,59 @@ def test_sqlite_session_exports_private_replay_cases(tmp_path: Path) -> None:
     result = export_store_session(store, "real-long-session", output)
     assert result.events == 3
     assert result.expected_decisions == 3
+    assert result.total_session_events == 3
+    assert result.truncated is False
     assert len(load_replay_cases(output)) == 3
     if os.name != "nt":
         assert output.stat().st_mode & 0o777 == 0o600
+
+
+def test_store_export_reports_truncation_and_sequence_range(tmp_path: Path) -> None:
+    anchors = GuardAnchors(task=TaskAnchor(goal="Implement and validate."))
+    store = SQLiteStore(tmp_path / "drift.db")
+    runtime = AgentDriftRuntime(CodexAdapter(), Supervisor(anchors, store=store))
+    for index in range(4):
+        runtime.handle(native_event(index), timestamp=NOW)
+    output = tmp_path / "truncated.jsonl"
+    result = export_store_session(store, "real-long-session", output, limit=2)
+    assert result.events == 2
+    assert result.total_session_events == 4
+    assert result.truncated is True
+    assert result.first_sequence == 2
+    assert result.last_sequence == 3
+
+
+def test_jsonl_exporter_rotates_and_reports_persistent_failures(tmp_path: Path) -> None:
+    anchors = GuardAnchors(task=TaskAnchor(goal="Stay in scope."))
+    runtime = AgentDriftRuntime(CodexAdapter(), Supervisor(anchors))
+    observation = runtime.handle(native_event(0), timestamp=NOW)
+    envelope = ObservationEnvelope(
+        processing_duration_ms=observation.processing_duration_ms,
+        supervision=observation.supervision,
+        response=observation.response,
+    )
+    path = tmp_path / "observations.jsonl"
+    exporter = JsonlExporter(path, max_bytes=4096, backup_count=2, max_record_bytes=4096)
+    for _ in range(8):
+        exporter.export(envelope)
+    status = exporter.status()
+    assert status.current_bytes <= 4096
+    assert status.rotated_files >= 1
+
+    bounded = JsonlExporter(
+        tmp_path / "bounded.jsonl",
+        max_bytes=1024,
+        backup_count=1,
+        max_record_bytes=100,
+    )
+    with pytest.raises(ValueError, match="telemetry record"):
+        bounded.export(envelope)
+    with pytest.raises(ValueError, match="telemetry record"):
+        bounded.export(envelope)
+    failed = bounded.status()
+    assert failed.failure_count == 2
+    assert failed.last_error is not None
+    assert failed.last_failure_at is not None
 
 
 def test_export_failure_does_not_change_guard_decision() -> None:

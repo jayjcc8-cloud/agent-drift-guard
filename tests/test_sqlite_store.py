@@ -67,7 +67,7 @@ def test_store_initializes_private_wal_database(tmp_path: Path) -> None:
         assert path.stat().st_mode & 0o777 == 0o600
     assert store.integrity_check() == "ok"
     assert store.stats().model_dump() == {
-        "schema_version": 2,
+        "schema_version": 3,
         "sessions": 0,
         "events": 0,
         "evidence": 0,
@@ -218,6 +218,60 @@ def test_retention_is_dry_run_by_default_and_cascades_on_apply(tmp_path: Path) -
     assert store.stats().decisions == 0
 
 
+def test_automatic_retention_runs_once_when_store_opens(tmp_path: Path) -> None:
+    path = tmp_path / "automatic.db"
+    seed = SQLiteStore(path, retention_policy=None)
+    stored = [seed.prepare_event(event(index)) for index in range(3)]
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE events SET stored_at_epoch = ? WHERE event_id = ?",
+            (int((datetime.now(UTC) - timedelta(days=60)).timestamp()), str(stored[0].event_id)),
+        )
+    maintained = SQLiteStore(
+        path,
+        retention_policy=RetentionPolicy(
+            max_age=timedelta(days=30),
+            max_events_per_session=2,
+        ),
+    )
+    assert maintained.last_automatic_prune is not None
+    assert maintained.last_automatic_prune.deleted_events == 1
+    assert maintained.stats().events == 2
+    reopened = SQLiteStore(path)
+    assert reopened.last_automatic_prune is None
+
+
+def test_automatic_retention_failure_rolls_back_maintenance_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "automatic-failure.db"
+    seed = SQLiteStore(path, retention_policy=None)
+    seed.prepare_event(event())
+
+    def fail_prune(
+        connection: sqlite3.Connection,
+        policy: RetentionPolicy,
+        *,
+        current: datetime,
+        dry_run: bool,
+    ) -> None:
+        del connection, policy, current, dry_run
+        raise sqlite3.OperationalError("simulated retention failure")
+
+    monkeypatch.setattr(SQLiteStore, "_prune_connection", staticmethod(fail_prune))
+    with pytest.raises(StoreError, match="failed to initialize SQLite store"):
+        SQLiteStore(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT value FROM maintenance WHERE key = 'retention.last_run_epoch'"
+            ).fetchone()
+            is None
+        )
+
+
 def test_schema_one_database_migrates_transactionally(tmp_path: Path) -> None:
     path = tmp_path / "legacy.db"
     legacy = event().model_copy(update={"sequence": 0})
@@ -269,8 +323,14 @@ def test_schema_one_database_migrates_transactionally(tmp_path: Path) -> None:
         )
 
     migrated = SQLiteStore(path)
-    assert migrated.stats().schema_version == 2
+    assert migrated.stats().schema_version == 3
     assert migrated.load_history("s1") == (legacy,)
     with sqlite3.connect(path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(events)")}
     assert {"stored_at_epoch", "redaction_count"} <= columns
+    with sqlite3.connect(path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+    assert "maintenance" in tables

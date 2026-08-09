@@ -18,6 +18,7 @@ _PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTIL
 HOOK_EVENT_TYPES: dict[str, EventType] = {
     "SessionStart": EventType.SESSION_START,
     "UserPromptSubmit": EventType.PROMPT_SUBMIT,
+    "PermissionRequest": EventType.PERMISSION_REQUEST,
     "PreToolUse": EventType.TOOL_BEFORE,
     "PostToolUse": EventType.TOOL_AFTER,
     "PostToolUseFailure": EventType.TOOL_ERROR,
@@ -25,7 +26,9 @@ HOOK_EVENT_TYPES: dict[str, EventType] = {
     "PostCompact": EventType.COMPACTION_AFTER,
     "SubagentStart": EventType.SUBAGENT_START,
     "SubagentStop": EventType.SUBAGENT_STOP,
+    "TaskCompleted": EventType.TASK_COMPLETED,
     "Stop": EventType.AGENT_STOP,
+    "StopFailure": EventType.AGENT_ERROR,
     "SessionEnd": EventType.SESSION_END,
 }
 
@@ -118,6 +121,21 @@ def normalized_payload(hook_name: str, raw: Mapping[str, JsonValue]) -> dict[str
         return {"reason": required_string(raw, "reason")}
     if event_type == EventType.PROMPT_SUBMIT:
         return {"prompt": required_string(raw, "prompt")}
+    if event_type == EventType.PERMISSION_REQUEST:
+        platform_tool = required_string(raw, "tool_name")
+        tool = canonical_tool_name(platform_tool)
+        arguments = required_value(raw, "tool_input")
+        permission_payload: dict[str, JsonValue] = {
+            "tool": tool,
+            "arguments": arguments,
+            "paths": cast(list[JsonValue], _extract_paths(tool, arguments)),
+        }
+        tool_call_id = optional_string(raw, "tool_use_id")
+        if tool_call_id:
+            permission_payload["tool_call_id"] = tool_call_id
+        if "permission_suggestions" in raw:
+            permission_payload["permission_suggestions"] = raw["permission_suggestions"]
+        return permission_payload
     if event_type in {EventType.TOOL_BEFORE, EventType.TOOL_AFTER, EventType.TOOL_ERROR}:
         platform_tool = required_string(raw, "tool_name")
         tool = canonical_tool_name(platform_tool)
@@ -160,6 +178,15 @@ def normalized_payload(hook_name: str, raw: Mapping[str, JsonValue]) -> dict[str
                 }
             )
         return payload
+    if event_type == EventType.TASK_COMPLETED:
+        payload = {
+            "task_id": required_string(raw, "task_id"),
+            "task_subject": required_string(raw, "task_subject"),
+        }
+        for key in ("task_description", "teammate_name", "team_name"):
+            if key in raw:
+                payload[key] = optional_string(raw, key)
+        return payload
     if event_type == EventType.AGENT_STOP:
         payload = {
             "stop_hook_active": required_bool(raw, "stop_hook_active"),
@@ -168,6 +195,12 @@ def normalized_payload(hook_name: str, raw: Mapping[str, JsonValue]) -> dict[str
         for key in ("background_tasks", "session_crons"):
             if key in raw:
                 payload[key] = raw[key]
+        return payload
+    if event_type == EventType.AGENT_ERROR:
+        payload = {"error": required_string(raw, "error")}
+        for key in ("error_details", "last_assistant_message"):
+            if key in raw:
+                payload[key] = optional_string(raw, key)
         return payload
     raise AdapterError(f"no payload profile for hook event {hook_name}")
 
@@ -210,6 +243,7 @@ def build_event(
         "source",
         "reason",
         "prompt",
+        "permission_suggestions",
         "tool_name",
         "tool_input",
         "tool_use_id",
@@ -224,6 +258,12 @@ def build_event(
         "agent_transcript_path",
         "background_tasks",
         "session_crons",
+        "task_id",
+        "task_subject",
+        "task_description",
+        "teammate_name",
+        "team_name",
+        "error_details",
     }
     extra = {key: value for key, value in raw.items() if key not in common_keys | payload_keys}
     extensions: dict[str, JsonValue] = {
@@ -236,6 +276,7 @@ def build_event(
         EventType.TOOL_BEFORE,
         EventType.TOOL_AFTER,
         EventType.TOOL_ERROR,
+        EventType.PERMISSION_REQUEST,
     }:
         extensions[f"{extension_namespace}.tool_name"] = raw["tool_name"]
     if extra:

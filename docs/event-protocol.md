@@ -1,4 +1,4 @@
-# Unified Agent Event Protocol v0.1
+# Unified Agent Event Protocol v0.2
 
 ## 信封
 
@@ -18,11 +18,12 @@ session、agent、时间和 JSON payload；其他字段用于可靠的顺序及�
 | `payload` | 已标准化 JSON 数据 |
 | `extensions` | 平台专属 JSON，key 必须带命名空间 |
 
-## v0.1 事件类型
+## 事件类型
 
 ```text
 session.start
 prompt.submit
+permission.request
 tool.before
 tool.after
 tool.error
@@ -30,9 +31,16 @@ compaction.before
 compaction.after
 subagent.start
 subagent.stop
+task.completed
 agent.stop
+agent.error
 session.end
 ```
+
+v0.2 新增 `permission.request`、`task.completed` 和 `agent.error`。Supervisor 同时支持读取 v0.1 与
+v0.2，因此 v0.5 生成的 SQLite/JSONL replay 不需要重写；新创建的事件默认写 v0.2。为兼容 v0.6
+开发阶段已经写入本地 Store 的记录，读取器也接受带新增类型的 v0.1 信封，但 Adapter 不再生产这种
+组合。Guard Decision 和 Platform Capabilities 是独立 wire contract，当前仍为 v0.1。
 
 Core 字段采用严格校验，未知字段会报错；这是为了尽早发现 Adapter 拼写错误。平台新字段放入
 `extensions`，例如 `claude.hook_input`。标准事件类型只随协议版本扩展，不能用任意字符串绕过。
@@ -44,9 +52,8 @@ Core 字段采用严格校验，未知字段会报错；这是为了尽早发现
 
 ## payload 约束
 
-v0.1 只冻结信封，没有过早冻结十一种事件的全部 payload。payload 必须是 JSON object。进入真实
+协议只冻结信封和标准事件集合，没有过早冻结每类事件的全部 payload。payload 必须是 JSON object。真实
 Adapter 阶段后，从 Codex/Claude 的共同语义提炼 payload profiles；平台原始 hook input 仍留在
 extensions，不能直接成为 Core 依赖。
 
 示例见 [`examples/tool-before.json`](../examples/tool-before.json)。
-

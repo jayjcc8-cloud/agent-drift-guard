@@ -1,5 +1,6 @@
 import io
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -35,7 +36,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertFalse(stderr)
-        self.assertEqual(json.loads(stdout)["protocol_version"], "0.1")
+        self.assertEqual(json.loads(stdout)["protocol_version"], "0.2")
 
     def test_invalid_event_returns_two(self) -> None:
         code, _, stderr = self._run_with_document("validate-event", {"event_type": "session.start"})
@@ -151,7 +152,7 @@ class CliTests(unittest.TestCase):
     def test_store_prune_requires_apply_to_delete(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "drift.db"
-            store = SQLiteStore(database)
+            store = SQLiteStore(database, retention_policy=None)
             for index in range(2):
                 store.prepare_event(
                     AgentEvent(
@@ -161,6 +162,8 @@ class CliTests(unittest.TestCase):
                         payload={"tool": "shell", "index": index},
                     )
                 )
+            with sqlite3.connect(database) as connection:
+                connection.execute("UPDATE events SET stored_at_epoch = 0 WHERE sequence = 0")
             command = [
                 "store-prune",
                 str(database),
@@ -204,6 +207,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["iterations"], 1)
+        self.assertTrue(result["telemetry_enabled"])
         self.assertFalse(result["budget_exceeded"])
         self.assertGreater(result["latency"]["minimum_ms"], 0)
 
@@ -240,6 +244,7 @@ class CliTests(unittest.TestCase):
                         "--anchors",
                         str(project / "examples/anchors.json"),
                         "--summary-only",
+                        "--assume-clean",
                         "--fail-on-mismatch",
                     ]
                 )
@@ -248,6 +253,48 @@ class CliTests(unittest.TestCase):
             self.assertEqual(report["total_events"], 1)
             self.assertEqual(report["mismatches"], 0)
             self.assertNotIn("entries", report)
+            self.assertEqual(report["semantic_compared_events"], 1)
+            self.assertEqual(report["quality"]["labeled_events"], 1)
+            self.assertEqual(report["quality"]["label_mismatches"], 0)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                status_code = main(["telemetry-status", str(telemetry)])
+            self.assertEqual(status_code, 0)
+            telemetry_status = json.loads(stdout.getvalue())
+            self.assertGreater(telemetry_status["current_bytes"], 0)
+            self.assertEqual(telemetry_status["failure_count"], 0)
+
+    def test_replay_fail_on_mismatch_includes_semantic_regressions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = Path(__file__).resolve().parents[1]
+            replay = root / "semantic-mismatch.jsonl"
+            replay.write_text(
+                json.dumps(
+                    {
+                        "event": AgentEvent(
+                            event_type=EventType.SESSION_START,
+                            platform="test",
+                            session_id="semantic-mismatch",
+                        ).model_dump(mode="json"),
+                        "expected_semantic_fingerprint": "0" * 64,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()):
+                code = main(
+                    [
+                        "replay",
+                        str(replay),
+                        "--anchors",
+                        str(project / "examples/anchors.json"),
+                        "--fail-on-mismatch",
+                    ]
+                )
+            self.assertEqual(code, 1)
 
     def test_install_status_and_uninstall_hooks_from_cli(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -265,7 +312,7 @@ class CliTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(install_code, 0)
-            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 10)
+            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 11)
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -280,7 +327,7 @@ class CliTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(status_code, 0)
-            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 10)
+            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 11)
 
             with redirect_stdout(io.StringIO()):
                 uninstall_code = main(
@@ -314,7 +361,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             document = json.loads((project / ".codex/hooks.json").read_text(encoding="utf-8"))
             command = document["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-            self.assertIn(str(entrypoint), command)
+            self.assertNotIn(str(entrypoint), command)
+            runner = project / ".agent-drift/codex-hook"
+            self.assertIn(str(entrypoint), runner.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

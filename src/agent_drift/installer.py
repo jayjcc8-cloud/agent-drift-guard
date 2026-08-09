@@ -20,6 +20,7 @@ _EVENTS: dict[PlatformName, tuple[str, ...]] = {
     "codex": (
         "SessionStart",
         "UserPromptSubmit",
+        "PermissionRequest",
         "PreToolUse",
         "PostToolUse",
         "PreCompact",
@@ -32,6 +33,7 @@ _EVENTS: dict[PlatformName, tuple[str, ...]] = {
     "claude-code": (
         "SessionStart",
         "UserPromptSubmit",
+        "PermissionRequest",
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
@@ -39,7 +41,9 @@ _EVENTS: dict[PlatformName, tuple[str, ...]] = {
         "PostCompact",
         "SubagentStart",
         "SubagentStop",
+        "TaskCompleted",
         "Stop",
+        "StopFailure",
         "SessionEnd",
     ),
 }
@@ -95,20 +99,38 @@ class HookInstaller:
 
     @property
     def config_path(self) -> Path:
-        relative = ".codex/hooks.json" if self.platform == "codex" else ".claude/settings.json"
+        relative = (
+            ".codex/hooks.json" if self.platform == "codex" else ".claude/settings.local.json"
+        )
         return self.project_root / relative
 
     @property
     def data_root(self) -> Path:
         return self.project_root / ".agent-drift"
 
+    @property
+    def runner_path(self) -> Path:
+        return self.data_root / f"{self.platform}-hook"
+
     def _validate_paths(self) -> None:
-        for path in (self.config_path.parent, self.data_root, self.project_root / ".gitignore"):
+        for path in (
+            self.config_path.parent,
+            self.data_root,
+            self.runner_path,
+            self.project_root / ".gitignore",
+        ):
             resolved = path.resolve()
             if not resolved.is_relative_to(self.project_root):
                 raise HookInstallError(f"refusing path outside project root: {path}")
 
     def _command(self) -> str:
+        if self.platform == "codex":
+            runner = '"$(git rev-parse --show-toplevel)/.agent-drift/codex-hook"'
+        else:
+            runner = '"${CLAUDE_PROJECT_DIR}/.agent-drift/claude-code-hook"'
+        return f"{_MARKER} {runner}"
+
+    def _runner_document(self) -> str:
         values = (
             str(self.executable),
             "hook",
@@ -123,7 +145,32 @@ class HookInstaller:
             "--telemetry-jsonl",
             str(self.data_root / "observations.jsonl"),
         )
-        return f"{_MARKER} " + " ".join(shlex.quote(value) for value in values)
+        return "#!/bin/sh\nexec " + " ".join(shlex.quote(value) for value in values) + "\n"
+
+    def _runner_changed(self) -> bool:
+        try:
+            return (
+                not self.runner_path.exists()
+                or self.runner_path.read_text(encoding="utf-8") != self._runner_document()
+            )
+        except OSError as exc:
+            raise HookInstallError(f"failed to inspect Hook runner: {exc}") from exc
+
+    def _write_runner(self) -> None:
+        self.runner_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{self.runner_path.name}.", dir=self.runner_path.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(self._runner_document())
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, 0o700)
+            os.replace(temporary, self.runner_path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _handler(self, event: str) -> dict[str, Any]:
         handler: dict[str, Any] = {
@@ -243,10 +290,15 @@ class HookInstaller:
         path = self.project_root / ".gitignore"
         current = path.read_text(encoding="utf-8") if path.exists() else ""
         lines = current.splitlines()
-        if ".agent-drift/" in lines:
+        required = [".agent-drift/"]
+        if self.platform == "claude-code":
+            required.append(".claude/settings.local.json")
+        missing = [entry for entry in required if entry not in lines]
+        if not missing:
             return False
         separator = "" if not current or current.endswith("\n") else "\n"
-        path.write_text(f"{current}{separator}.agent-drift/\n", encoding="utf-8")
+        addition = "".join(f"{entry}\n" for entry in missing)
+        path.write_text(f"{current}{separator}{addition}", encoding="utf-8")
         return True
 
     def install(
@@ -257,18 +309,22 @@ class HookInstaller:
     ) -> HookInstallResult:
         updated, installed = self._merged_config(install=True)
         current = self._read_config()
-        changed = updated != current
+        config_changed = updated != current
+        runner_changed = self._runner_changed()
+        changed = config_changed or runner_changed
         anchors_document = self._load_anchors(anchors)
         write_anchors = anchors is not None or not (self.data_root / "anchors.json").exists()
         backup: Path | None = None
         gitignore_updated = False
         if not dry_run:
-            if changed:
+            if config_changed:
                 backup = self._backup()
             gitignore_updated = self._ensure_gitignore()
             if write_anchors:
                 self._write_anchors(anchors_document)
-            if changed:
+            if runner_changed:
+                self._write_runner()
+            if config_changed:
                 self._write_config(updated)
         return HookInstallResult(
             platform=self.platform,

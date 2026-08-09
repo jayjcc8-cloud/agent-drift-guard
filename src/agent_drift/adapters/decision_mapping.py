@@ -41,12 +41,16 @@ def common_hook_response(
     reason = decision.context or decision.reason
 
     if action == DecisionAction.ALLOW:
+        if event.event_type == EventType.PERMISSION_REQUEST:
+            return HookResponse(applied_action="defer")
         return HookResponse(applied_action=applied)
     if action == DecisionAction.WARN:
         return HookResponse(stdout={"systemMessage": decision.reason}, applied_action=applied)
     if action == DecisionAction.RETRY:
         return None
     if action == DecisionAction.CONTINUE:
+        if event.event_type == EventType.TASK_COMPLETED:
+            return HookResponse(stderr=reason, exit_code=2, applied_action=applied)
         if event.event_type not in {EventType.AGENT_STOP, EventType.SUBAGENT_STOP}:
             return None
         return HookResponse(stdout={"decision": "block", "reason": reason}, applied_action=applied)
@@ -67,6 +71,19 @@ def common_hook_response(
             applied_action=applied,
         )
     if action == DecisionAction.BLOCK:
+        if event.event_type == EventType.PERMISSION_REQUEST:
+            return HookResponse(
+                stdout={
+                    "hookSpecificOutput": {
+                        "hookEventName": hook_name,
+                        "decision": {
+                            "behavior": "deny",
+                            "message": decision.reason,
+                        },
+                    }
+                },
+                applied_action=applied,
+            )
         if event.event_type == EventType.TOOL_BEFORE:
             return HookResponse(
                 stdout={
@@ -95,6 +112,8 @@ def common_hook_response(
                 else {"decision": "block", "reason": reason}
             )
             return HookResponse(stdout=output, applied_action=applied)
+        if event.event_type == EventType.TASK_COMPLETED:
+            return HookResponse(stderr=reason, exit_code=2, applied_action=applied)
         return None
     if action == DecisionAction.ABORT:
         if event.event_type in {

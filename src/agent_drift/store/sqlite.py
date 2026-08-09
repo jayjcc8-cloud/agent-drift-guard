@@ -6,7 +6,7 @@ import os
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -21,7 +21,8 @@ from agent_drift.store.privacy import (
     RetentionPolicy,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+_DEFAULT_RETENTION_POLICY = RetentionPolicy()
 
 _SCHEMA = (
     """
@@ -69,6 +70,12 @@ _SCHEMA = (
         decision_json TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS maintenance (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+    """,
 )
 
 
@@ -84,7 +91,14 @@ def _migrate_1_to_2(connection: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {1: _migrate_1_to_2}
+def _migrate_2_to_3(connection: sqlite3.Connection) -> None:
+    connection.execute("CREATE TABLE maintenance (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+
+
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    1: _migrate_1_to_2,
+    2: _migrate_2_to_3,
+}
 
 
 class SQLiteStore:
@@ -96,12 +110,19 @@ class SQLiteStore:
         *,
         timeout_seconds: float = 10.0,
         redaction_policy: RedactionPolicy | None = None,
+        retention_policy: RetentionPolicy | None = _DEFAULT_RETENTION_POLICY,
+        retention_interval: timedelta = timedelta(days=1),
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if retention_interval <= timedelta(0):
+            raise ValueError("retention_interval must be positive")
         self.path = Path(path).expanduser().resolve()
         self._timeout_seconds = timeout_seconds
         self._redactor = EventRedactor(redaction_policy)
+        self._retention_policy = retention_policy
+        self._retention_interval = retention_interval
+        self.last_automatic_prune: PruneResult | None = None
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -160,6 +181,28 @@ class SQLiteStore:
                         migration(connection)
                         version += 1
                         connection.execute(f"PRAGMA user_version = {version}")
+                if self._retention_policy is not None:
+                    now_epoch = int(datetime.now(UTC).timestamp())
+                    row = connection.execute(
+                        "SELECT value FROM maintenance WHERE key = 'retention.last_run_epoch'"
+                    ).fetchone()
+                    last_run = int(row["value"]) if row is not None else None
+                    interval_seconds = int(self._retention_interval.total_seconds())
+                    if last_run is None or now_epoch - last_run >= interval_seconds:
+                        self.last_automatic_prune = self._prune_connection(
+                            connection,
+                            self._retention_policy,
+                            current=datetime.fromtimestamp(now_epoch, UTC),
+                            dry_run=False,
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO maintenance(key, value)
+                            VALUES ('retention.last_run_epoch', ?)
+                            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                            """,
+                            (str(now_epoch),),
+                        )
         except sqlite3.Error as exc:
             raise StoreError(f"failed to initialize SQLite store {self.path}: {exc}") from exc
         if not existed:
@@ -265,6 +308,17 @@ class SQLiteStore:
         events = [AgentEvent.model_validate_json(row["event_json"]) for row in rows]
         events.reverse()
         return tuple(events)
+
+    def count_session_events(self, session_id: str) -> int:
+        try:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise StoreError(f"failed to count session events: {exc}") from exc
+        return int(row[0]) if row is not None else 0
 
     @staticmethod
     def _load_result(connection: sqlite3.Connection, event_id: UUID) -> SupervisionResult | None:
@@ -389,68 +443,78 @@ class SQLiteStore:
             raise ValueError("retention time must include a timezone offset")
         try:
             with self._transaction(immediate=True) as connection:
-                event_ids: set[str] = set()
-                if policy.max_age is not None:
-                    cutoff = int((current - policy.max_age).timestamp())
-                    event_ids.update(
-                        str(row["event_id"])
-                        for row in connection.execute(
-                            "SELECT event_id FROM events WHERE stored_at_epoch < ?",
-                            (cutoff,),
-                        )
-                    )
-                if policy.max_events_per_session is not None:
-                    event_ids.update(
-                        str(row["event_id"])
-                        for row in connection.execute(
-                            """
-                            SELECT event_id
-                            FROM (
-                                SELECT event_id,
-                                       ROW_NUMBER() OVER (
-                                           PARTITION BY session_id ORDER BY sequence DESC
-                                       ) AS session_rank
-                                FROM events
-                            )
-                            WHERE session_rank > ?
-                            """,
-                            (policy.max_events_per_session,),
-                        )
-                    )
-                if dry_run:
-                    return PruneResult(
-                        matched_events=len(event_ids),
-                        deleted_events=0,
-                        deleted_sessions=0,
-                        dry_run=True,
-                    )
-                connection.executemany(
-                    "DELETE FROM events WHERE event_id = ?",
-                    ((event_id,) for event_id in event_ids),
-                )
-                empty_sessions = int(
-                    connection.execute(
-                        """
-                        SELECT COUNT(*) FROM sessions
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM events WHERE events.session_id = sessions.session_id
-                        )
-                        """
-                    ).fetchone()[0]
-                )
-                connection.execute(
-                    """
-                    DELETE FROM sessions
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM events WHERE events.session_id = sessions.session_id
-                    )
-                    """
-                )
-                return PruneResult(
-                    matched_events=len(event_ids),
-                    deleted_events=len(event_ids),
-                    deleted_sessions=empty_sessions,
-                    dry_run=False,
-                )
+                return self._prune_connection(connection, policy, current=current, dry_run=dry_run)
         except sqlite3.Error as exc:
             raise StoreError(f"failed to apply retention policy: {exc}") from exc
+
+    @staticmethod
+    def _prune_connection(
+        connection: sqlite3.Connection,
+        policy: RetentionPolicy,
+        *,
+        current: datetime,
+        dry_run: bool,
+    ) -> PruneResult:
+        event_ids: set[str] = set()
+        if policy.max_age is not None:
+            cutoff = int((current - policy.max_age).timestamp())
+            event_ids.update(
+                str(row["event_id"])
+                for row in connection.execute(
+                    "SELECT event_id FROM events WHERE stored_at_epoch < ?",
+                    (cutoff,),
+                )
+            )
+        if policy.max_events_per_session is not None:
+            event_ids.update(
+                str(row["event_id"])
+                for row in connection.execute(
+                    """
+                    SELECT event_id
+                    FROM (
+                        SELECT event_id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY session_id ORDER BY sequence DESC
+                               ) AS session_rank
+                        FROM events
+                    )
+                    WHERE session_rank > ?
+                    """,
+                    (policy.max_events_per_session,),
+                )
+            )
+        if dry_run:
+            return PruneResult(
+                matched_events=len(event_ids),
+                deleted_events=0,
+                deleted_sessions=0,
+                dry_run=True,
+            )
+        connection.executemany(
+            "DELETE FROM events WHERE event_id = ?",
+            ((event_id,) for event_id in event_ids),
+        )
+        empty_sessions = int(
+            connection.execute(
+                """
+                SELECT COUNT(*) FROM sessions
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM events WHERE events.session_id = sessions.session_id
+                )
+                """
+            ).fetchone()[0]
+        )
+        connection.execute(
+            """
+            DELETE FROM sessions
+            WHERE NOT EXISTS (
+                SELECT 1 FROM events WHERE events.session_id = sessions.session_id
+            )
+            """
+        )
+        return PruneResult(
+            matched_events=len(event_ids),
+            deleted_events=len(event_ids),
+            deleted_sessions=empty_sessions,
+            dry_run=False,
+        )

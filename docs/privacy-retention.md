@@ -28,7 +28,10 @@ agent-drift hook codex - \
 保留策略使用可信的入库时间，而不是 Adapter 提供的事件时间。默认策略为 30 天、每个 session
 最多 5000 个事件，两个条件取并集。外键级联会同步删除 evidence 和 decision，空 session 随后删除。
 
-清理命令默认只预览：
+真实 Hook 路径打开 Store 时默认至多每日自动执行一次该策略；v3 的 `maintenance` 表保存最近运行
+时间，不需要常驻 daemon。自动清理不执行 `VACUUM`，也可在构造 `SQLiteStore` 时将
+`retention_policy=None` 显式关闭。只读与维护 CLI 会关闭打开时清理，确保 `store-prune` 的默认预览
+不会先产生删除。运维人员可用以下命令预览或立即清理：
 
 ```bash
 agent-drift store-prune ~/.agent-drift/drift.db
@@ -36,15 +39,16 @@ agent-drift store-prune ~/.agent-drift/drift.db --max-age-days 14 --max-events-p
 agent-drift store-prune ~/.agent-drift/drift.db --max-age-days 14 --apply
 ```
 
-可用 `--no-age-limit` 或 `--no-count-limit` 关闭单个边界，但不能同时关闭两者。`--apply` 是实际
-删除的显式开关；清理不自动执行 `VACUUM`，以免 Hook 路径出现长时间独占锁。
+可用 `--no-age-limit` 或 `--no-count-limit` 关闭单个边界，但不能同时关闭两者。对显式命令而言，
+`--apply` 仍是实际删除的开关。
 
 ## Schema migration
 
-当前 SQLite schema 为 v2。打开 v1 数据库时会在单个 `BEGIN IMMEDIATE` 事务中增加：
+当前 SQLite schema 为 v3。打开 v1 数据库时会逐步在 `BEGIN IMMEDIATE` 事务中增加：
 
 - `stored_at_epoch`：保留策略使用的入库时间；
 - `redaction_count`：每个事件的替换计数。
+- `maintenance`：记录自动保留等低频维护任务的时间。
 
 迁移逐版本注册并在每步完成后更新 `PRAGMA user_version`。失败会回滚，未来版本仍会被拒绝。
 v1 历史事件没有原始入库时间，只能以其事件时间初始化；历史内容也不会被追溯脱敏。生产升级前仍应

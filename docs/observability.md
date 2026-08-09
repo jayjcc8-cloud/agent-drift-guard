@@ -7,7 +7,8 @@
 - `supervision`：规范化事件、Detector evidence 和抽象 decision；
 - `response`：实际应用到平台的动作和原生 Hook 输出。
 
-当前提供 `JsonlExporter` 和 `CompositeExporter`。API 使用示例：
+当前提供 `JsonlExporter` 和 `CompositeExporter`。JSONL 默认最多使用约 128 MiB（32 MiB 当前文件加
+3 个备份），单条记录上限 1 MiB；跨 Hook 进程轮转由文件锁串行化。API 使用示例：
 
 ```python
 runtime = AgentDriftRuntime(
@@ -21,5 +22,12 @@ CLI Hook 使用 SQLite 时，Exporter 接收到的是已经脱敏的持久化事
 上启用 Exporter 时，调用方必须先保证事件不包含敏感内容。
 
 Exporter 是 best-effort：导出异常记录在 `RuntimeOutcome.export_error`，不会把 `allow` 改成 `block`
-或反过来。JSONL 作为 v0.5 的本地事实源，先用于 replay 和运行审计；OTLP/HTTP 映射将在 envelope
-经真实长会话验证后加入，避免过早冻结错误的 span/log 语义。
+或反过来。失败次数、最近失败时间与截断后的错误保存在私有 health 文件，可运行：
+
+```bash
+agent-drift telemetry-status .agent-drift/observations.jsonl
+```
+
+手工配置 `agent-drift hook` 时可用 `--telemetry-max-bytes`、`--telemetry-backups` 和
+`--telemetry-max-record-bytes` 调整边界。一键安装器当前使用上述默认值。JSONL 继续作为本地事实源；
+OTLP/HTTP 映射将在真实语料质量门通过后加入，避免过早冻结错误的 span/log 语义。

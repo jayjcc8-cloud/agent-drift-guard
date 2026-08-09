@@ -31,12 +31,19 @@ class DecisionPolicy:
         primary = max(evidence, key=lambda item: (_SEVERITY_ORDER[item.severity], item.score))
         if primary.severity == Severity.LOW:
             action = DecisionAction.WARN
-        elif event.event_type == EventType.TOOL_BEFORE and primary.severity in {
+        elif event.event_type in {
+            EventType.TOOL_BEFORE,
+            EventType.PERMISSION_REQUEST,
+        } and primary.severity in {
             Severity.HIGH,
             Severity.CRITICAL,
         }:
             action = DecisionAction.BLOCK
-        elif event.event_type in {EventType.AGENT_STOP, EventType.SUBAGENT_STOP}:
+        elif event.event_type in {
+            EventType.AGENT_STOP,
+            EventType.SUBAGENT_STOP,
+            EventType.TASK_COMPLETED,
+        }:
             action = DecisionAction.CONTINUE
         else:
             action = DecisionAction.REANCHOR

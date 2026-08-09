@@ -45,6 +45,21 @@ class AgentEventTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             event.assert_supported("0.1")
 
+    def test_v01_event_remains_readable(self) -> None:
+        event = self._event(protocol_version="0.1")
+        event.assert_supported()
+
+    def test_new_event_types_default_to_v02_but_pre_release_v01_remains_readable(self) -> None:
+        self.assertEqual(
+            self._event(event_type=EventType.PERMISSION_REQUEST).protocol_version,
+            "0.2",
+        )
+        legacy = self._event(
+            event_type=EventType.PERMISSION_REQUEST,
+            protocol_version="0.1",
+        )
+        legacy.assert_supported()
+
 
 if __name__ == "__main__":
     unittest.main()

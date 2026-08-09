@@ -1,4 +1,4 @@
-"""Unified Agent Event Protocol v0.1."""
+"""Unified Agent Event Protocol v0.2 with explicit v0.1 read compatibility."""
 
 from __future__ import annotations
 
@@ -10,12 +10,16 @@ from uuid import UUID, uuid4
 from pydantic import Field, JsonValue, field_validator
 
 from agent_drift.protocol.base import WireModel
-from agent_drift.protocol.versioning import PROTOCOL_VERSION, ProtocolVersion
+from agent_drift.protocol.versioning import ProtocolVersion
+
+EVENT_PROTOCOL_VERSION = "0.2"
+SUPPORTED_EVENT_PROTOCOL_VERSIONS = frozenset({"0.1", EVENT_PROTOCOL_VERSION})
 
 
 class EventType(StrEnum):
     SESSION_START = "session.start"
     PROMPT_SUBMIT = "prompt.submit"
+    PERMISSION_REQUEST = "permission.request"
     TOOL_BEFORE = "tool.before"
     TOOL_AFTER = "tool.after"
     TOOL_ERROR = "tool.error"
@@ -23,7 +27,9 @@ class EventType(StrEnum):
     COMPACTION_AFTER = "compaction.after"
     SUBAGENT_START = "subagent.start"
     SUBAGENT_STOP = "subagent.stop"
+    TASK_COMPLETED = "task.completed"
     AGENT_STOP = "agent.stop"
+    AGENT_ERROR = "agent.error"
     SESSION_END = "session.end"
 
 
@@ -42,7 +48,7 @@ class AgentEvent(WireModel):
     """
 
     protocol_version: ProtocolVersion = Field(
-        default_factory=lambda: ProtocolVersion(PROTOCOL_VERSION)
+        default_factory=lambda: ProtocolVersion(EVENT_PROTOCOL_VERSION)
     )
     event_id: UUID = Field(default_factory=uuid4)
     event_type: EventType
@@ -78,8 +84,14 @@ class AgentEvent(WireModel):
             )
         return value
 
-    def assert_supported(self, supported: str | ProtocolVersion = PROTOCOL_VERSION) -> None:
-        if not self.protocol_version.is_compatible_with(supported):
+    def assert_supported(self, supported: str | ProtocolVersion | None = None) -> None:
+        if supported is None:
+            compatible = str(self.protocol_version) in SUPPORTED_EVENT_PROTOCOL_VERSIONS
+            supported_label = ", ".join(sorted(SUPPORTED_EVENT_PROTOCOL_VERSIONS))
+        else:
+            compatible = self.protocol_version.is_compatible_with(supported)
+            supported_label = str(supported)
+        if not compatible:
             raise ValueError(
-                f"event protocol {self.protocol_version} is not compatible with {supported}"
+                f"event protocol {self.protocol_version} is not compatible with {supported_label}"
             )
