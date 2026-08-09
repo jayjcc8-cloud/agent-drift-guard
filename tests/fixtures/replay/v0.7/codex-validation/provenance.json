@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "corpus_version": "v0.7",
+  "case_id": "codex-validation",
+  "platform": "codex",
+  "platform_version": "0.147.0",
+  "scenario": "validation",
+  "source_kind": "real-controlled-session",
+  "raw_capture_sha256": "3697fa3e2755c6bec9461185c3fae8b7585bfe5bef07d8e870337331106521bb",
+  "event_count": 5,
+  "expected_decision_counts": {"allow": 4, "continue": 1},
+  "expected_drift_event_counts": {"validation_drift": 1, "state_drift": 1},
+  "human_labels_reviewed": true,
+  "privacy_review": {"status":"passed","raw_data_committed":false,"prompts_removed":true,"tool_outputs_removed":true,"transcript_paths_removed":true,"credentials_found":false,"reviewed_on":"2026-08-09"},
+  "documented_platform_differences": ["Codex reported the failed command through PostToolUse as plain text."]
+}

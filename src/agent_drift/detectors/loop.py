@@ -11,7 +11,13 @@ from agent_drift.protocol.events import AgentEvent, EventType
 
 
 def _fingerprint(event: AgentEvent) -> str:
-    data = {"tool": event.payload.get("tool"), "arguments": event.payload.get("arguments")}
+    arguments = event.payload.get("arguments")
+    if isinstance(arguments, dict):
+        # Claude Code may change this display-only field between otherwise
+        # identical calls (for example "attempt 1 of 5"). It does not affect
+        # execution semantics and must not break deterministic loop matching.
+        arguments = {key: value for key, value in arguments.items() if key != "description"}
+    data = {"tool": event.payload.get("tool"), "arguments": arguments}
     return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 

@@ -13,10 +13,18 @@
 - Codex/Claude protocol matrix coverage for permission, task completion and terminal failure events.
 - Private, project-local Hook runners with shareable configuration free of machine paths.
 
-## v0.7 — Evidence-led integrations
+## v0.7 — Real-session Detector evidence gate (complete)
 
-- Expand privacy-reviewed, drift-positive real-session fixtures before adding new integrations.
-- OTLP/HTTP export only after telemetry semantics pass the real-session quality gate.
+- Eight privacy-reviewed real controlled sessions: four Codex and four Claude Code scenarios.
+- Forty manually labeled minimized events with deterministic action and semantic regression gates.
+- Evidence-backed normalization for unittest results and LoopDetector fingerprints.
+- 100% exact match, 0% clean false-positive rate, and no missed expected positives.
+- No new integration surface: OTLP, diagnostics, daemon, Adapters, LLM Judge, and DriftTypes remain out of scope.
+
+## v0.8 — Observability integration (proposed)
+
+- OTLP/HTTP export only after the v0.7 evidence gate remains stable.
+- Exporter retry, backpressure, and failure visibility without changing guard decisions.
 - One-command diagnostics bundle only with an explicit privacy contract.
 - Optional Unix socket daemon only when target-machine p95 is materially over budget.
 

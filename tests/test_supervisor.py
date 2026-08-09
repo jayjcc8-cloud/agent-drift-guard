@@ -102,6 +102,27 @@ def test_fifth_identical_tool_call_is_loop_drift() -> None:
     assert result.evidence[0].drift_type == DriftType.LOOP
 
 
+def test_claude_display_description_does_not_hide_identical_loop() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    for index in range(5):
+        event = adapter.adapt_event(
+            claude_hook(
+                "PreToolUse",
+                tool_name="Bash",
+                tool_use_id=f"tool-{index}",
+                tool_input={
+                    "command": "python3 -m unittest tests.test_always_fail",
+                    "description": f"Run controlled failure (attempt {index + 1} of 5)",
+                },
+            ),
+            timestamp=NOW,
+        )
+        result = supervisor.process(event)
+    assert result.decision.action == DecisionAction.BLOCK
+    assert result.evidence[0].drift_type == DriftType.LOOP
+
+
 def _write_event(adapter: ClaudeCodeAdapter) -> Any:
     return adapter.adapt_event(
         claude_hook(

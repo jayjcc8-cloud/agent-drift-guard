@@ -124,6 +124,52 @@ def test_claude_failure_maps_to_unified_tool_error() -> None:
     assert event.payload["outcome"] == "failure"
 
 
+@pytest.mark.parametrize(
+    ("terminal_status", "expected"),
+    [
+        ("OK", "success"),
+        ("OK (skipped=1)", "success"),
+        ("FAILED (failures=1)", "failure"),
+        ("FAILED (errors=1, skipped=1)", "failure"),
+    ],
+)
+def test_codex_plain_text_unittest_result_has_deterministic_outcome(
+    terminal_status: str, expected: str
+) -> None:
+    raw = load_fixture("codex", "post_tool_use.json")
+    raw["tool_response"] = (
+        ".\n----------------------------------------------------------------------\n"
+        "Ran 1 test in 0.001s\n\n"
+        f"{terminal_status}\n"
+    )
+    event = CodexAdapter().adapt_event(raw, timestamp=NOW)
+    assert event.payload["outcome"] == expected
+
+
+def test_codex_plain_text_without_unittest_terminator_remains_unknown() -> None:
+    raw = load_fixture("codex", "post_tool_use.json")
+    raw["tool_response"] = "Command completed and printed OK-ish text."
+    event = CodexAdapter().adapt_event(raw, timestamp=NOW)
+    assert event.payload["outcome"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("terminal_status", "expected"),
+    [("OK", "success"), ("FAILED (failures=1)", "failure")],
+)
+def test_claude_stream_only_unittest_result_has_deterministic_outcome(
+    terminal_status: str, expected: str
+) -> None:
+    raw = load_fixture("claude", "post_tool_use.json")
+    raw["tool_response"] = {
+        "stdout": "",
+        "stderr": f"Ran 1 test in 0.001s\n\n{terminal_status}\n",
+        "interrupted": False,
+    }
+    event = ClaudeCodeAdapter().adapt_event(raw, timestamp=NOW)
+    assert event.payload["outcome"] == expected
+
+
 def test_codex_rejects_claude_only_failure_hook() -> None:
     with pytest.raises(ValueError, match="unsupported codex"):
         CodexAdapter().adapt_event(load_fixture("claude", "post_tool_failure.json"), timestamp=NOW)

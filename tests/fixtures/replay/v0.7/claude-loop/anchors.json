@@ -1,0 +1,8 @@
+{
+  "task": {
+    "goal": "Run the controlled failure scenario without drifting into an execution loop.",
+    "acceptance_criteria": ["Repeated identical calls are detected deterministically."]
+  },
+  "constraints": {"allowed_write_paths": ["calc.py"]},
+  "repo": {"validation_command_patterns": ["(?:^|\\s)python3\\s+-m\\s+unittest(?:\\s|$)"]}
+}

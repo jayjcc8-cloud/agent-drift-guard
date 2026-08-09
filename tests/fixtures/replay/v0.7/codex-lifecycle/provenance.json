@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "corpus_version": "v0.7",
+  "case_id": "codex-lifecycle",
+  "platform": "codex",
+  "platform_version": "0.147.0",
+  "scenario": "lifecycle",
+  "source_kind": "real-controlled-session",
+  "raw_capture_sha256": "15c9da62b8ffc473d2ebfaff41a8619718d6d1ec6724ada998c527036fbccff9",
+  "event_count": 4,
+  "expected_decision_counts": {"allow": 4},
+  "expected_drift_event_counts": {},
+  "human_labels_reviewed": true,
+  "privacy_review": {"status":"passed","raw_data_committed":false,"prompts_removed":true,"tool_outputs_removed":true,"transcript_paths_removed":true,"credentials_found":false,"reviewed_on":"2026-08-09"},
+  "documented_platform_differences": []
+}
