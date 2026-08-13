@@ -4,6 +4,19 @@ This project follows semantic versioning for the Python package and documents op
 
 ## Unreleased
 
+## 0.7.1 - 2026-08-13
+
+- Enforce `0700` on private Hook data and backup directories and `0600` on anchors and
+  configuration backups, including repair of existing installations.
+- Make `hook-status` verify handlers, the executable runner, anchors, and private permissions, and
+  return a non-zero status for degraded installations.
+- Resolve nested Codex project runners relative to the enclosing Git root and reject non-Git Codex
+  installation targets instead of installing a command that cannot run.
+- Count anchors, `.gitignore`, and permission repairs as installation changes, and write replay
+  reports atomically with `0600` permissions.
+- Recognize Python standard-library `unittest` commands in generated default anchors and migrate the
+  exact legacy generated default, preventing verified Codex sessions from being blocked at Stop.
+
 ## 0.7.0 - 2026-08-09
 
 - Add eight privacy-reviewed, real controlled Codex 0.147.0 and Claude Code 2.1.98 replay cases with

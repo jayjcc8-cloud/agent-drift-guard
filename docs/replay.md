@@ -48,7 +48,8 @@ CLI 逐行读取 Replay，不会先把长会话全部载入内存；它按原顺
 Detector/Policy。v0.2 报告记录 anchors 指纹、历史上限、协议版本、决策/证据分布、action 与完整
 确定性语义的比较，以及忽略随机 evidence/decision ID 的总语义 SHA-256 指纹。
 `--fail-on-mismatch` 在 action 或语义不一致时返回退出码 1；`--summary-only` 同时避免在内存和报告中
-保留逐事件条目。
+保留逐事件条目。`--output` 使用原子替换并把报告权限固定为 `0600`；报告仍可能包含 session ID、
+路径或 evidence，不应因已有脱敏而视为匿名数据。
 
 人工标注过的 case 会额外计算 exact match、clean false-positive rate、TP/FP/FN、precision、recall 和
 F1；标签不从旧 decision/evidence 自动推导，避免把历史模型输出误当成真值。对已经人工确认无漂移的

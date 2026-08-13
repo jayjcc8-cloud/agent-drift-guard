@@ -183,6 +183,72 @@ def test_successful_validation_allows_stop() -> None:
     assert not result.evidence
 
 
+def test_real_codex_unittest_success_allows_stop_with_default_repo_anchors() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = CodexAdapter()
+    supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "PreToolUse",
+                tool_name="apply_patch",
+                tool_use_id="patch-1",
+                tool_input={"command": "*** Update File: calc.py\n@@"},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+    supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="test-1",
+                tool_input={"command": "python3 -m unittest tests.test_calc"},
+                tool_response=(
+                    ".\n----------------------------------------------------------------------\n"
+                    "Ran 1 test in 0.000s\n\nOK\n"
+                ),
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+    supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="checkpoint-1",
+                tool_input={
+                    "command": (
+                        "python3 work_unit.py checkpoint "
+                        '--summary "python3 -m unittest tests.test_calc passes"'
+                    )
+                },
+                tool_response='{"status":"closed"}',
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "Stop",
+                stop_hook_active=False,
+                last_assistant_message="Implementation completed.",
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    assert result.decision.action == DecisionAction.ALLOW
+    assert not result.evidence
+
+
 def test_completion_claim_after_failed_validation_is_state_and_validation_drift() -> None:
     supervisor = Supervisor(anchors())
     adapter = ClaudeCodeAdapter()

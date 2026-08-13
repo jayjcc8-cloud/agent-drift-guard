@@ -46,6 +46,7 @@ class PlanAnchor(WireModel):
 class RepoAnchor(WireModel):
     validation_command_patterns: tuple[str, ...] = (
         r"(?:^|\s)pytest(?:\s|$)",
+        r"(?:^|(?:&&|\|\||;)\s*)(?:uv\s+run\s+)?(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?unittest(?:\s|$)",
         r"(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
         r"(?:^|\s)cargo\s+test(?:\s|$)",
         r"(?:^|\s)go\s+test(?:\s|$)",

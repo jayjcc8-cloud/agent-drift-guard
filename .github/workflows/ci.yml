@@ -24,3 +24,13 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy src tests
       - run: uv run pytest
+
+  macos-installer-smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --locked --no-editable
+      - run: uv run pytest tests/test_installer.py tests/test_cli.py

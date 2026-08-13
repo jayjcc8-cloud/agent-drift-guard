@@ -6,16 +6,28 @@ import json
 import os
 import shlex
 import shutil
+import stat
+import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from agent_drift.core import GuardAnchors, TaskAnchor
+from agent_drift.core import GuardAnchors, RepoAnchor, TaskAnchor
 from agent_drift.protocol.base import WireModel
 
 PlatformName = Literal["codex", "claude-code"]
 _MARKER = "AGENT_DRIFT_GUARD=1"
+_DEFAULT_TASK_GOAL = "Keep work aligned with the current user task and validate changes."
+_LEGACY_DEFAULT_REPO = RepoAnchor(
+    validation_command_patterns=(
+        r"(?:^|\s)pytest(?:\s|$)",
+        r"(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
+        r"(?:^|\s)cargo\s+test(?:\s|$)",
+        r"(?:^|\s)go\s+test(?:\s|$)",
+        r"(?:^|\s)dotnet\s+test(?:\s|$)",
+    )
+)
 _EVENTS: dict[PlatformName, tuple[str, ...]] = {
     "codex": (
         "SessionStart",
@@ -62,6 +74,8 @@ class HookInstallResult(WireModel):
     backup_path: str | None = None
     review_required: bool = True
     gitignore_updated: bool = False
+    healthy: bool | None = None
+    health_issues: tuple[str, ...] = ()
 
 
 def _is_agent_drift_handler(handler: Any) -> bool:
@@ -96,6 +110,7 @@ class HookInstaller:
         if not os.access(self.executable, os.X_OK):
             raise HookInstallError(f"agent-drift executable is not executable: {self.executable}")
         self._validate_paths()
+        self._codex_git_root: Path | None = None
 
     @property
     def config_path(self) -> Path:
@@ -125,10 +140,86 @@ class HookInstaller:
 
     def _command(self) -> str:
         if self.platform == "codex":
-            runner = '"$(git rev-parse --show-toplevel)/.agent-drift/codex-hook"'
+            git_root = self._resolve_codex_git_root()
+            relative_runner = self.runner_path.relative_to(git_root).as_posix()
+            runner = '"$(git rev-parse --show-toplevel)"/' + shlex.quote(relative_runner)
         else:
             runner = '"${CLAUDE_PROJECT_DIR}/.agent-drift/claude-code-hook"'
         return f"{_MARKER} {runner}"
+
+    def _resolve_codex_git_root(self) -> Path:
+        if self._codex_git_root is not None:
+            return self._codex_git_root
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(self.project_root), "rev-parse", "--show-toplevel"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            raise HookInstallError(
+                f"failed to locate Git for Codex Hook installation: {exc}"
+            ) from exc
+        if completed.returncode != 0 or not completed.stdout.strip():
+            raise HookInstallError(
+                "Codex project root must be inside a Git worktree because the shareable "
+                "Hook command resolves its private runner from the Git root"
+            )
+        git_root = Path(completed.stdout.strip()).resolve()
+        if not self.project_root.is_relative_to(git_root):
+            raise HookInstallError(
+                f"Codex project root is outside its reported Git worktree: {self.project_root}"
+            )
+        self._codex_git_root = git_root
+        return git_root
+
+    @staticmethod
+    def _mode(path: Path) -> int:
+        return stat.S_IMODE(path.stat().st_mode)
+
+    @staticmethod
+    def _ensure_private_directory(path: Path) -> None:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name != "nt":
+            os.chmod(path, 0o700)
+
+    def _private_layout_needs_update(self) -> bool:
+        if not self.data_root.is_dir():
+            return True
+        if os.name == "nt":
+            return False
+        expected_modes = (
+            (self.data_root, 0o700),
+            (self.data_root / "backups", 0o700),
+            (self.runner_path, 0o700),
+            (self.data_root / "anchors.json", 0o600),
+        )
+        for path, expected in expected_modes:
+            if path.exists() and self._mode(path) != expected:
+                return True
+        backup_root = self.data_root / "backups"
+        return backup_root.is_dir() and any(
+            path.is_file() and self._mode(path) != 0o600 for path in backup_root.iterdir()
+        )
+
+    def _secure_private_layout(self) -> None:
+        self._ensure_private_directory(self.data_root)
+        backup_root = self.data_root / "backups"
+        if backup_root.exists():
+            self._ensure_private_directory(backup_root)
+        if os.name == "nt":
+            return
+        for path, mode in (
+            (self.runner_path, 0o700),
+            (self.data_root / "anchors.json", 0o600),
+        ):
+            if path.is_file():
+                os.chmod(path, mode)
+        if backup_root.is_dir():
+            for path in backup_root.iterdir():
+                if path.is_file():
+                    os.chmod(path, 0o600)
 
     def _runner_document(self) -> str:
         values = (
@@ -157,7 +248,7 @@ class HookInstaller:
             raise HookInstallError(f"failed to inspect Hook runner: {exc}") from exc
 
     def _write_runner(self) -> None:
-        self.runner_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._ensure_private_directory(self.runner_path.parent)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{self.runner_path.name}.", dir=self.runner_path.parent
         )
@@ -240,10 +331,13 @@ class HookInstaller:
         if not self.config_path.exists():
             return None
         backup_root = self.data_root / "backups"
-        backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._ensure_private_directory(self.data_root)
+        self._ensure_private_directory(backup_root)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         backup = backup_root / f"{self.platform}-{stamp}.json"
         shutil.copy2(self.config_path, backup)
+        if os.name != "nt":
+            os.chmod(backup, 0o600)
         return backup
 
     def _write_config(self, document: dict[str, Any]) -> None:
@@ -271,29 +365,48 @@ class HookInstaller:
                     Path(source).expanduser().read_text(encoding="utf-8")
                 )
             if destination.exists():
-                return GuardAnchors.model_validate_json(destination.read_text(encoding="utf-8"))
-            return GuardAnchors(
-                task=TaskAnchor(
-                    goal="Keep work aligned with the current user task and validate changes."
+                current = GuardAnchors.model_validate_json(destination.read_text(encoding="utf-8"))
+                legacy_default = GuardAnchors(
+                    task=TaskAnchor(goal=_DEFAULT_TASK_GOAL),
+                    repo=_LEGACY_DEFAULT_REPO,
                 )
-            )
+                if current == legacy_default:
+                    return GuardAnchors(task=TaskAnchor(goal=_DEFAULT_TASK_GOAL))
+                return current
+            return GuardAnchors(task=TaskAnchor(goal=_DEFAULT_TASK_GOAL))
         except (OSError, ValueError) as exc:
             raise HookInstallError(f"invalid anchors configuration: {exc}") from exc
 
     def _write_anchors(self, anchors: GuardAnchors) -> None:
         destination = self.data_root / "anchors.json"
-        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._ensure_private_directory(destination.parent)
         destination.write_text(anchors.model_dump_json(indent=2), encoding="utf-8")
-        os.chmod(destination, 0o600)
+        if os.name != "nt":
+            os.chmod(destination, 0o600)
 
-    def _ensure_gitignore(self) -> bool:
+    def _anchors_changed(self, anchors: GuardAnchors) -> bool:
+        destination = self.data_root / "anchors.json"
+        if not destination.exists():
+            return True
+        try:
+            current = GuardAnchors.model_validate_json(destination.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return True
+        return current != anchors
+
+    def _missing_gitignore_entries(self) -> tuple[str, ...]:
         path = self.project_root / ".gitignore"
         current = path.read_text(encoding="utf-8") if path.exists() else ""
         lines = current.splitlines()
         required = [".agent-drift/"]
         if self.platform == "claude-code":
             required.append(".claude/settings.local.json")
-        missing = [entry for entry in required if entry not in lines]
+        return tuple(entry for entry in required if entry not in lines)
+
+    def _ensure_gitignore(self) -> bool:
+        path = self.project_root / ".gitignore"
+        current = path.read_text(encoding="utf-8") if path.exists() else ""
+        missing = self._missing_gitignore_entries()
         if not missing:
             return False
         separator = "" if not current or current.endswith("\n") else "\n"
@@ -311,21 +424,33 @@ class HookInstaller:
         current = self._read_config()
         config_changed = updated != current
         runner_changed = self._runner_changed()
-        changed = config_changed or runner_changed
         anchors_document = self._load_anchors(anchors)
-        write_anchors = anchors is not None or not (self.data_root / "anchors.json").exists()
+        anchors_changed = self._anchors_changed(anchors_document)
+        gitignore_changed = bool(self._missing_gitignore_entries())
+        permissions_changed = self._private_layout_needs_update()
+        changed = any(
+            (
+                config_changed,
+                runner_changed,
+                anchors_changed,
+                gitignore_changed,
+                permissions_changed,
+            )
+        )
         backup: Path | None = None
         gitignore_updated = False
         if not dry_run:
+            self._secure_private_layout()
             if config_changed:
                 backup = self._backup()
             gitignore_updated = self._ensure_gitignore()
-            if write_anchors:
+            if anchors_changed:
                 self._write_anchors(anchors_document)
             if runner_changed:
                 self._write_runner()
             if config_changed:
                 self._write_config(updated)
+            self._secure_private_layout()
         return HookInstallResult(
             platform=self.platform,
             action="install-dry-run" if dry_run else "install",
@@ -371,11 +496,35 @@ class HookInstaller:
                     ):
                         installed.append(str(event))
                         break
+        issues: list[str] = []
+        missing_events = sorted(set(_EVENTS[self.platform]) - set(installed))
+        if missing_events:
+            issues.append("missing Hook handlers: " + ", ".join(missing_events))
+        if not self.runner_path.exists():
+            issues.append("missing Hook runner")
+        elif not self.runner_path.is_file():
+            issues.append("Hook runner is not a regular file")
+        elif not os.access(self.runner_path, os.X_OK):
+            issues.append("Hook runner is not executable")
+        elif self._runner_changed():
+            issues.append("Hook runner does not match the current installation")
+        anchors_path = self.data_root / "anchors.json"
+        if not anchors_path.is_file():
+            issues.append("missing anchors configuration")
+        else:
+            try:
+                GuardAnchors.model_validate_json(anchors_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                issues.append("invalid anchors configuration")
+        if self._private_layout_needs_update():
+            issues.append("private runtime permissions require repair")
         return HookInstallResult(
             platform=self.platform,
             action="status",
             config_path=str(self.config_path),
             changed=False,
             installed_events=tuple(sorted(installed)),
-            review_required=False,
+            review_required=bool(issues),
+            healthy=not issues,
+            health_issues=tuple(issues),
         )

@@ -1,6 +1,8 @@
 import io
 import json
+import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,6 +16,15 @@ from agent_drift.store import SQLiteStore
 
 
 class CliTests(unittest.TestCase):
+    @staticmethod
+    def _initialize_git(project: Path) -> None:
+        subprocess.run(
+            ["git", "init", "--quiet", str(project)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
     def _run_with_document(self, command: str, document: dict[str, object]) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.json"
@@ -296,9 +307,32 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(code, 1)
 
+    @unittest.skipIf(os.name == "nt", "POSIX file modes are required")
+    def test_replay_output_is_written_privately(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = Path(__file__).resolve().parents[1]
+            output = root / "report.json"
+
+            code = main(
+                [
+                    "replay",
+                    str(project / "tests/fixtures/replay/v0.7/codex-clean/replay.jsonl"),
+                    "--anchors",
+                    str(project / "tests/fixtures/replay/v0.7/codex-clean/anchors.json"),
+                    "--output",
+                    str(output),
+                    "--summary-only",
+                ]
+            )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
     def test_install_status_and_uninstall_hooks_from_cli(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)
+            self._initialize_git(project)
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 install_code = main(
@@ -327,7 +361,9 @@ class CliTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(status_code, 0)
-            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 11)
+            status = json.loads(stdout.getvalue())
+            self.assertEqual(len(status["installed_events"]), 11)
+            self.assertTrue(status["healthy"])
 
             with redirect_stdout(io.StringIO()):
                 uninstall_code = main(
@@ -342,9 +378,48 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(uninstall_code, 0)
 
+    def test_hook_status_returns_one_for_missing_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._initialize_git(project)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "install-hooks",
+                            "codex",
+                            "--project-root",
+                            str(project),
+                            "--executable",
+                            sys.executable,
+                        ]
+                    ),
+                    0,
+                )
+            (project / ".agent-drift/codex-hook").unlink()
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "hook-status",
+                        "codex",
+                        "--project-root",
+                        str(project),
+                        "--executable",
+                        sys.executable,
+                    ]
+                )
+
+            self.assertEqual(code, 1)
+            status = json.loads(stdout.getvalue())
+            self.assertFalse(status["healthy"])
+            self.assertIn("missing Hook runner", status["health_issues"])
+
     def test_install_uses_current_agent_drift_entrypoint_when_not_on_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)
+            self._initialize_git(project)
             entrypoint = project / "bin" / "agent-drift"
             entrypoint.parent.mkdir()
             entrypoint.write_text("#!/bin/sh\n", encoding="utf-8")

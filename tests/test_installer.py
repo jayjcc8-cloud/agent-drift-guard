@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,8 +18,19 @@ def executable(tmp_path: Path) -> Path:
     return path
 
 
+def initialize_git(project: Path) -> None:
+    project.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "init", "--quiet", str(project)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_codex_install_is_idempotent_and_preserves_existing_hooks(tmp_path: Path) -> None:
     project = tmp_path / "project with spaces"
+    initialize_git(project)
     config = project / ".codex/hooks.json"
     config.parent.mkdir(parents=True)
     config.write_text(
@@ -57,6 +69,9 @@ def test_codex_install_is_idempotent_and_preserves_existing_hooks(tmp_path: Path
     assert ".agent-drift/" in (project / ".gitignore").read_text(encoding="utf-8")
     assert result.gitignore_updated is True
     if os.name != "nt":
+        assert installer.data_root.stat().st_mode & 0o777 == 0o700
+        assert Path(result.backup_path).stat().st_mode & 0o777 == 0o600
+        assert (project / ".agent-drift/anchors.json").stat().st_mode & 0o777 == 0o600
         assert config.stat().st_mode & 0o777 == 0o600
 
     second = installer.install()
@@ -89,7 +104,7 @@ def test_claude_install_preserves_non_hook_settings(tmp_path: Path) -> None:
 
 def test_install_dry_run_does_not_touch_project(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    project.mkdir()
+    initialize_git(project)
     installer = HookInstaller("codex", project, executable=executable(tmp_path))
     result = installer.install(dry_run=True)
     assert result.changed is True
@@ -101,7 +116,7 @@ def test_install_dry_run_does_not_touch_project(tmp_path: Path) -> None:
 def test_installer_rejects_config_symlink_outside_project(tmp_path: Path) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
-    project.mkdir()
+    initialize_git(project)
     outside.mkdir()
     (project / ".codex").symlink_to(outside, target_is_directory=True)
     with pytest.raises(HookInstallError, match="outside project root"):
@@ -110,7 +125,7 @@ def test_installer_rejects_config_symlink_outside_project(tmp_path: Path) -> Non
 
 def test_invalid_anchors_do_not_activate_hook_configuration(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    project.mkdir()
+    initialize_git(project)
     invalid = tmp_path / "invalid-anchors.json"
     invalid.write_text('{"task": {}}', encoding="utf-8")
     installer = HookInstaller("codex", project, executable=executable(tmp_path))
@@ -118,3 +133,96 @@ def test_invalid_anchors_do_not_activate_hook_configuration(tmp_path: Path) -> N
         installer.install(anchors=invalid)
     assert not installer.config_path.exists()
     assert not (project / ".gitignore").exists()
+
+
+def test_codex_install_rejects_a_non_git_project(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    with pytest.raises(HookInstallError, match="Git worktree"):
+        installer.install()
+
+
+def test_codex_install_locates_a_nested_project_relative_to_git_root(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    initialize_git(repository)
+    project = repository / "packages" / "app with spaces"
+    project.mkdir(parents=True)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+
+    installer.install()
+
+    document = json.loads(installer.config_path.read_text(encoding="utf-8"))
+    command = document["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert "git rev-parse --show-toplevel" in command
+    assert "packages/app with spaces/.agent-drift/codex-hook" in command
+    assert installer.runner_path.exists()
+
+
+def test_status_reports_a_missing_runner_as_unhealthy(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installer.install()
+    installer.runner_path.unlink()
+
+    result = installer.status()
+
+    assert len(result.installed_events) == 11
+    assert result.healthy is False
+    assert "missing Hook runner" in result.health_issues
+
+
+def test_install_changed_includes_anchor_and_gitignore_mutations(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installer.install()
+    anchors = tmp_path / "anchors.json"
+    anchors.write_text(
+        json.dumps({"task": {"goal": "Updated production goal."}}),
+        encoding="utf-8",
+    )
+
+    anchor_result = installer.install(anchors=anchors)
+    assert anchor_result.changed is True
+
+    (project / ".gitignore").unlink()
+    gitignore_result = installer.install()
+    assert gitignore_result.changed is True
+    assert gitignore_result.gitignore_updated is True
+
+
+def test_install_upgrades_only_the_legacy_generated_default_anchors(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    data_root = project / ".agent-drift"
+    data_root.mkdir()
+    anchors_path = data_root / "anchors.json"
+    anchors_path.write_text(
+        json.dumps(
+            {
+                "task": {
+                    "goal": "Keep work aligned with the current user task and validate changes."
+                },
+                "repo": {
+                    "validation_command_patterns": [
+                        r"(?:^|\s)pytest(?:\s|$)",
+                        r"(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
+                        r"(?:^|\s)cargo\s+test(?:\s|$)",
+                        r"(?:^|\s)go\s+test(?:\s|$)",
+                        r"(?:^|\s)dotnet\s+test(?:\s|$)",
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+
+    result = installer.install()
+
+    assert result.changed is True
+    upgraded = json.loads(anchors_path.read_text(encoding="utf-8"))
+    patterns = upgraded["repo"]["validation_command_patterns"]
+    assert any("unittest" in pattern for pattern in patterns)
