@@ -16,6 +16,11 @@ This project follows semantic versioning for the Python package and documents op
   reports atomically with `0600` permissions.
 - Recognize Python standard-library `unittest` commands in generated default anchors and migrate the
   exact legacy generated default, preventing verified Codex sessions from being blocked at Stop.
+- Reject tampered, duplicate, or unexpected managed Hook handlers and require runtime data to remain
+  covered by the generated `.gitignore` boundary.
+- Anchor all generated validation patterns to real shell command boundaries so command arguments that
+  merely mention a test command cannot override successful validation.
+- Repair existing SQLite databases and every regular Hook runtime file to private POSIX permissions.
 
 ## 0.7.0 - 2026-08-09
 

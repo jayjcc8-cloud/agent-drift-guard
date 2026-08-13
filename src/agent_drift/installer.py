@@ -28,6 +28,16 @@ _LEGACY_DEFAULT_REPO = RepoAnchor(
         r"(?:^|\s)dotnet\s+test(?:\s|$)",
     )
 )
+_V071_DEFAULT_REPO = RepoAnchor(
+    validation_command_patterns=(
+        r"(?:^|\s)pytest(?:\s|$)",
+        r"(?:^|(?:&&|\|\||;)\s*)(?:uv\s+run\s+)?(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?unittest(?:\s|$)",
+        r"(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
+        r"(?:^|\s)cargo\s+test(?:\s|$)",
+        r"(?:^|\s)go\s+test(?:\s|$)",
+        r"(?:^|\s)dotnet\s+test(?:\s|$)",
+    )
+)
 _EVENTS: dict[PlatformName, tuple[str, ...]] = {
     "codex": (
         "SessionStart",
@@ -189,37 +199,34 @@ class HookInstaller:
             return True
         if os.name == "nt":
             return False
-        expected_modes = (
-            (self.data_root, 0o700),
-            (self.data_root / "backups", 0o700),
-            (self.runner_path, 0o700),
-            (self.data_root / "anchors.json", 0o600),
-        )
-        for path, expected in expected_modes:
-            if path.exists() and self._mode(path) != expected:
+        if self._mode(self.data_root) != 0o700:
+            return True
+        if self.config_path.is_file() and self._mode(self.config_path) != 0o600:
+            return True
+        for path in self.data_root.rglob("*"):
+            if path.is_symlink():
+                continue
+            if path.is_dir() and self._mode(path) != 0o700:
                 return True
-        backup_root = self.data_root / "backups"
-        return backup_root.is_dir() and any(
-            path.is_file() and self._mode(path) != 0o600 for path in backup_root.iterdir()
-        )
+            if path.is_file():
+                expected = 0o700 if path == self.runner_path else 0o600
+                if self._mode(path) != expected:
+                    return True
+        return False
 
     def _secure_private_layout(self) -> None:
         self._ensure_private_directory(self.data_root)
-        backup_root = self.data_root / "backups"
-        if backup_root.exists():
-            self._ensure_private_directory(backup_root)
         if os.name == "nt":
             return
-        for path, mode in (
-            (self.runner_path, 0o700),
-            (self.data_root / "anchors.json", 0o600),
-        ):
-            if path.is_file():
-                os.chmod(path, mode)
-        if backup_root.is_dir():
-            for path in backup_root.iterdir():
-                if path.is_file():
-                    os.chmod(path, 0o600)
+        if self.config_path.is_file():
+            os.chmod(self.config_path, 0o600)
+        for path in self.data_root.rglob("*"):
+            if path.is_symlink():
+                continue
+            if path.is_dir():
+                os.chmod(path, 0o700)
+            elif path.is_file():
+                os.chmod(path, 0o700 if path == self.runner_path else 0o600)
 
     def _runner_document(self) -> str:
         values = (
@@ -366,11 +373,17 @@ class HookInstaller:
                 )
             if destination.exists():
                 current = GuardAnchors.model_validate_json(destination.read_text(encoding="utf-8"))
-                legacy_default = GuardAnchors(
-                    task=TaskAnchor(goal=_DEFAULT_TASK_GOAL),
-                    repo=_LEGACY_DEFAULT_REPO,
+                generated_defaults = (
+                    GuardAnchors(
+                        task=TaskAnchor(goal=_DEFAULT_TASK_GOAL),
+                        repo=_LEGACY_DEFAULT_REPO,
+                    ),
+                    GuardAnchors(
+                        task=TaskAnchor(goal=_DEFAULT_TASK_GOAL),
+                        repo=_V071_DEFAULT_REPO,
+                    ),
                 )
-                if current == legacy_default:
+                if current in generated_defaults:
                     return GuardAnchors(task=TaskAnchor(goal=_DEFAULT_TASK_GOAL))
                 return current
             return GuardAnchors(task=TaskAnchor(goal=_DEFAULT_TASK_GOAL))
@@ -483,23 +496,39 @@ class HookInstaller:
         document = self._read_config()
         hooks = document.get("hooks", {})
         installed: list[str] = []
+        managed_handlers: dict[str, list[dict[str, Any]]] = {}
         if isinstance(hooks, dict):
             for event, groups in hooks.items():
                 if not isinstance(groups, list):
                     continue
+                event_handlers: list[dict[str, Any]] = []
                 for group in groups:
                     if not isinstance(group, dict):
                         continue
                     handlers = group.get("hooks")
-                    if isinstance(handlers, list) and any(
-                        _is_agent_drift_handler(handler) for handler in handlers
-                    ):
-                        installed.append(str(event))
-                        break
+                    if isinstance(handlers, list):
+                        event_handlers.extend(
+                            handler for handler in handlers if _is_agent_drift_handler(handler)
+                        )
+                if event_handlers:
+                    event_name = str(event)
+                    installed.append(event_name)
+                    managed_handlers[event_name] = event_handlers
         issues: list[str] = []
         missing_events = sorted(set(_EVENTS[self.platform]) - set(installed))
         if missing_events:
             issues.append("missing Hook handlers: " + ", ".join(missing_events))
+        for event in _EVENTS[self.platform]:
+            handlers = managed_handlers.get(event, [])
+            if len(handlers) > 1:
+                issues.append(f"multiple Agent Drift Guard Hook handlers: {event}")
+            elif handlers and handlers[0] != self._handler(event):
+                issues.append(f"invalid Agent Drift Guard Hook handler: {event}")
+        unexpected_events = sorted(set(managed_handlers) - set(_EVENTS[self.platform]))
+        if unexpected_events:
+            issues.append(
+                "unexpected Agent Drift Guard Hook handlers: " + ", ".join(unexpected_events)
+            )
         if not self.runner_path.exists():
             issues.append("missing Hook runner")
         elif not self.runner_path.is_file():
@@ -518,6 +547,9 @@ class HookInstaller:
                 issues.append("invalid anchors configuration")
         if self._private_layout_needs_update():
             issues.append("private runtime permissions require repair")
+        missing_gitignore = self._missing_gitignore_entries()
+        if missing_gitignore:
+            issues.append("missing .gitignore entries: " + ", ".join(missing_gitignore))
         return HookInstallResult(
             platform=self.platform,
             action="status",

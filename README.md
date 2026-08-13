@@ -72,3 +72,4 @@ Codex 0.147.0 与 Claude Code 2.1.98 的 8 个受控真实会话建立 40 事件
 
 Codex 一键安装要求目标位于 Git worktree 内；仓库子目录会通过 Git 根目录下的相对路径定位私有
 runner。`hook-status` 不只检查配置标记，还验证 runner、anchors 和私有权限，降级安装返回退出码 1。
+它同时核对 managed handler 的完整定义与唯一性，并确认 `.agent-drift/` 仍受 `.gitignore` 保护。

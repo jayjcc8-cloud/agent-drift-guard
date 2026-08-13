@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from agent_drift.installer import HookInstaller, HookInstallError
+from agent_drift.store import SQLiteStore
 
 
 def executable(tmp_path: Path) -> Path:
@@ -173,6 +174,73 @@ def test_status_reports_a_missing_runner_as_unhealthy(tmp_path: Path) -> None:
     assert "missing Hook runner" in result.health_issues
 
 
+def test_status_rejects_tampered_and_duplicate_managed_handlers(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installer.install()
+    document = json.loads(installer.config_path.read_text(encoding="utf-8"))
+    handlers = document["hooks"]["PreToolUse"][0]["hooks"]
+    handlers[0]["command"] = "AGENT_DRIFT_GUARD=1 true"
+    handlers.append(dict(handlers[0]))
+    installer.config_path.write_text(json.dumps(document), encoding="utf-8")
+
+    result = installer.status()
+
+    assert result.healthy is False
+    assert "multiple Agent Drift Guard Hook handlers: PreToolUse" in result.health_issues
+
+
+def test_status_rejects_a_tampered_managed_handler(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installer.install()
+    document = json.loads(installer.config_path.read_text(encoding="utf-8"))
+    handler = document["hooks"]["Stop"][0]["hooks"][0]
+    handler["command"] = "AGENT_DRIFT_GUARD=1 true"
+    installer.config_path.write_text(json.dumps(document), encoding="utf-8")
+
+    result = installer.status()
+
+    assert result.healthy is False
+    assert "invalid Agent Drift Guard Hook handler: Stop" in result.health_issues
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes are not available on Windows")
+def test_status_and_install_cover_all_runtime_permissions_and_gitignore(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installer.install()
+    SQLiteStore(installer.data_root / "drift.db")
+    telemetry = installer.data_root / "observations.jsonl"
+    telemetry.write_text("{}\n", encoding="utf-8")
+    nested = installer.data_root / "runtime" / "state.json"
+    nested.parent.mkdir()
+    nested.write_text("{}\n", encoding="utf-8")
+    for path in (installer.config_path, installer.data_root / "drift.db", telemetry, nested):
+        path.chmod(0o644)
+    nested.parent.chmod(0o755)
+    (project / ".gitignore").write_text("", encoding="utf-8")
+
+    degraded = installer.status()
+
+    assert degraded.healthy is False
+    assert "private runtime permissions require repair" in degraded.health_issues
+    assert "missing .gitignore entries: .agent-drift/" in degraded.health_issues
+
+    repaired = installer.install()
+
+    assert repaired.changed is True
+    assert repaired.gitignore_updated is True
+    assert installer.status().healthy is True
+    assert installer.config_path.stat().st_mode & 0o777 == 0o600
+    assert nested.parent.stat().st_mode & 0o777 == 0o700
+    for path in (installer.data_root / "drift.db", telemetry, nested):
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
 def test_install_changed_includes_anchor_and_gitignore_mutations(tmp_path: Path) -> None:
     project = tmp_path / "project"
     initialize_git(project)
@@ -226,3 +294,39 @@ def test_install_upgrades_only_the_legacy_generated_default_anchors(tmp_path: Pa
     upgraded = json.loads(anchors_path.read_text(encoding="utf-8"))
     patterns = upgraded["repo"]["validation_command_patterns"]
     assert any("unittest" in pattern for pattern in patterns)
+    assert all(r"(?:^|(?:&&|\|\||;)\s*)" in pattern for pattern in patterns)
+
+
+def test_install_upgrades_the_v071_generated_default_anchors(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    data_root = project / ".agent-drift"
+    data_root.mkdir()
+    anchors_path = data_root / "anchors.json"
+    anchors_path.write_text(
+        json.dumps(
+            {
+                "task": {
+                    "goal": "Keep work aligned with the current user task and validate changes."
+                },
+                "repo": {
+                    "validation_command_patterns": [
+                        r"(?:^|\s)pytest(?:\s|$)",
+                        r"(?:^|(?:&&|\|\||;)\s*)(?:uv\s+run\s+)?(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?unittest(?:\s|$)",
+                        r"(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
+                        r"(?:^|\s)cargo\s+test(?:\s|$)",
+                        r"(?:^|\s)go\s+test(?:\s|$)",
+                        r"(?:^|\s)dotnet\s+test(?:\s|$)",
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+
+    installer.install()
+
+    upgraded = json.loads(anchors_path.read_text(encoding="utf-8"))
+    patterns = upgraded["repo"]["validation_command_patterns"]
+    assert all(r"(?:^|(?:&&|\|\||;)\s*)" in pattern for pattern in patterns)

@@ -78,6 +78,17 @@ def test_store_initializes_private_wal_database(tmp_path: Path) -> None:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes are not available on Windows")
+def test_store_repairs_permissions_on_an_existing_database(tmp_path: Path) -> None:
+    path = tmp_path / "drift.db"
+    SQLiteStore(path)
+    path.chmod(0o644)
+
+    SQLiteStore(path)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
 def test_event_and_result_round_trip(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "drift.db")
     stored = store.prepare_event(event())

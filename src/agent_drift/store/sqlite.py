@@ -158,7 +158,6 @@ class SQLiteStore:
                 raise
 
     def _initialize(self) -> None:
-        existed = self.path.exists()
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
             with self._transaction(immediate=True) as connection:
@@ -205,7 +204,7 @@ class SQLiteStore:
                         )
         except sqlite3.Error as exc:
             raise StoreError(f"failed to initialize SQLite store {self.path}: {exc}") from exc
-        if not existed:
+        if os.name != "nt":
             with suppress(OSError):
                 os.chmod(self.path, 0o600)
 
