@@ -4,6 +4,26 @@ This project follows semantic versioning for the Python package and documents op
 
 ## Unreleased
 
+## 0.7.1 - 2026-08-20
+
+- Enforce `0700` on private Hook data and backup directories and `0600` on anchors and
+  configuration backups, including repair of existing installations.
+- Make `hook-status` verify handlers, the executable runner, anchors, and private permissions, and
+  return a non-zero status for degraded installations.
+- Resolve nested Codex project runners relative to the enclosing Git root and reject non-Git Codex
+  installation targets instead of installing a command that cannot run.
+- Count anchors, `.gitignore`, and permission repairs as installation changes, and write replay
+  reports atomically with `0600` permissions.
+- Recognize Python standard-library `unittest` commands in generated default anchors and migrate the
+  exact legacy generated default, preventing verified Codex sessions from being blocked at Stop.
+- Reject tampered, duplicate, or unexpected managed Hook handlers and require runtime data to remain
+  covered by the generated `.gitignore` boundary.
+- Anchor all generated validation patterns to real shell command boundaries so command arguments that
+  merely mention a test command cannot override successful validation.
+- Repair existing SQLite databases and every regular Hook runtime file to private POSIX permissions.
+- Preserve custom constraint and plan anchors while upgrading generated repository validation defaults.
+- Make the v2-to-v3 SQLite migration tolerate an already-created maintenance table.
+
 ## 0.7.0 - 2026-08-09
 
 - Add eight privacy-reviewed, real controlled Codex 0.147.0 and Claude Code 2.1.98 replay cases with

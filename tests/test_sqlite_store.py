@@ -78,6 +78,17 @@ def test_store_initializes_private_wal_database(tmp_path: Path) -> None:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes are not available on Windows")
+def test_store_repairs_permissions_on_an_existing_database(tmp_path: Path) -> None:
+    path = tmp_path / "drift.db"
+    SQLiteStore(path)
+    path.chmod(0o644)
+
+    SQLiteStore(path)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
 def test_event_and_result_round_trip(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "drift.db")
     stored = store.prepare_event(event())
@@ -334,3 +345,76 @@ def test_schema_one_database_migrates_transactionally(tmp_path: Path) -> None:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
     assert "maintenance" in tables
+
+
+def test_schema_migration_2_to_3_is_idempotent_with_existing_maintenance_table(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-mixed.db"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE sessions (
+                session_id TEXT PRIMARY KEY,
+                next_sequence INTEGER NOT NULL
+            );
+            CREATE TABLE events (
+                event_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(session_id),
+                sequence INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                stored_at_epoch INTEGER NOT NULL CHECK (stored_at_epoch >= 0),
+                redaction_count INTEGER NOT NULL DEFAULT 0,
+                event_json TEXT NOT NULL,
+                UNIQUE(session_id, sequence)
+            );
+            CREATE INDEX IF NOT EXISTS events_session_sequence ON events(session_id, sequence);
+            CREATE TABLE evidence (
+                evidence_id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+                ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+                evidence_json TEXT NOT NULL,
+                UNIQUE(event_id, ordinal)
+            );
+            CREATE TABLE decisions (
+                decision_id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL UNIQUE REFERENCES events(event_id) ON DELETE CASCADE,
+                action TEXT NOT NULL,
+                decision_json TEXT NOT NULL
+            );
+            CREATE TABLE maintenance (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            PRAGMA user_version = 2;
+            """
+        )
+        legacy = event().model_copy(update={"sequence": 0, "session_id": "mixed"})
+        connection.execute("INSERT INTO sessions VALUES (?, ?)", (legacy.session_id, 1))
+        connection.execute(
+            "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(legacy.event_id),
+                legacy.session_id,
+                legacy.sequence,
+                legacy.event_type.value,
+                legacy.platform,
+                legacy.timestamp.isoformat(),
+                int(legacy.timestamp.timestamp()),
+                0,
+                legacy.model_dump_json(),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO maintenance VALUES ('retention.last_run_epoch', '1234567890')"
+        )
+
+    migrated = SQLiteStore(path, retention_policy=None)
+    assert migrated.stats().schema_version == 3
+    assert migrated.load_history("mixed") == (legacy,)
+
+    reopened = SQLiteStore(path, retention_policy=None)
+    assert reopened.stats().schema_version == 3
+    assert reopened.load_history("mixed") == (legacy,)

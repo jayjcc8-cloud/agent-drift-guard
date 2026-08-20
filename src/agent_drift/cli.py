@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -31,6 +33,28 @@ def _read_json(path: str) -> Any:
 
 def _write_model(model: Any) -> None:
     print(model.model_dump_json(indent=2, exclude_none=True))
+
+
+def _write_private_text(path: str | Path, text: str) -> None:
+    destination = Path(path).expanduser().resolve()
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+        if os.name != "nt":
+            os.chmod(destination, 0o600)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def _adapter(platform: str, platform_version: str | None = None) -> PlatformAdapter:
@@ -281,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 document.pop("entries", None)
             replay_output = json.dumps(document, ensure_ascii=False, indent=2)
             if args.output:
-                Path(args.output).write_text(replay_output + "\n", encoding="utf-8")
+                _write_private_text(args.output, replay_output + "\n")
             else:
                 print(replay_output)
             if args.fail_on_mismatch and (
@@ -314,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 install_result = installer.status()
             _write_model(install_result)
+            if args.command == "hook-status" and install_result.healthy is False:
+                return 1
         elif args.command == "adapter-capabilities":
             _write_model(_adapter(args.platform, args.platform_version).capabilities)
         elif args.command == "adapt-hook":

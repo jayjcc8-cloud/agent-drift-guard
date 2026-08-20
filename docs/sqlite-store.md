@@ -17,7 +17,9 @@ Codex 和 Claude Code 的 command Hook 通常每次启动一个新进程。仅�
 | `maintenance` | 自动保留等维护任务时间 | 每个维护 key 唯一 |
 
 数据库使用 schema `user_version=3`、foreign keys、WAL、`synchronous=NORMAL` 和 busy timeout。首次创建
-时目录权限请求为 `0700`、数据库文件请求为 `0600`。
+时目录权限请求为 `0700`、数据库文件请求为 `0600`；重新打开已有数据库时也会把数据库文件修复为
+`0600`。项目 Hook 安装器另外统一检查和修复 `.agent-drift/` 内的数据库 sidecar、telemetry、health、
+lock 与备份文件权限。
 
 ## 原子处理语义
 

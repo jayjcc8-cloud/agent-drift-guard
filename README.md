@@ -16,7 +16,7 @@ Gemini CLI 等平台的生命周期事件转换成统一协议，再由独立的
   每日自动保留清理和事务化 schema migration。
 - `JsonlExporter` / replay：有界采集脱敏真实长会话、流式重跑当前策略，并比较决策、语义回归与
   人工标签质量。
-- Hook installer：幂等安装、检查或卸载 Codex 与 Claude Code 项目 Hook。
+- Hook installer：幂等安装、健康检查或卸载 Codex 与 Claude Code 项目 Hook，并修复私有目录权限。
 
 这三个契约刻意不依赖 Detector、LLM Judge、数据库或具体平台 SDK。后续模块只能依赖它们，
 不能反向把平台细节带入 Core。
@@ -69,3 +69,7 @@ Codex 0.147.0 与 Claude Code 2.1.98 的 8 个受控真实会话建立 40 事件
 100%，clean false-positive rate 为 0%。Constraint/Scope 继续由协议契约测试覆盖；Goal/Plan/Decision
 尚无 Detector。尚未实现 LLM Judge 和 OTLP/HTTP exporter。daemon 仅在目标机器延迟持续达到阶段门
 时才会实现。
+
+Codex 一键安装要求目标位于 Git worktree 内；仓库子目录会通过 Git 根目录下的相对路径定位私有
+runner。`hook-status` 不只检查配置标记，还验证 runner、anchors 和私有权限，降级安装返回退出码 1。
+它同时核对 managed handler 的完整定义与唯一性，并确认 `.agent-drift/` 仍受 `.gitignore` 保护。

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+
 from agent_drift.adapters import ClaudeCodeAdapter, CodexAdapter
 from agent_drift.core import ConstraintAnchor, GuardAnchors, Supervisor, TaskAnchor
 from agent_drift.protocol.decisions import DecisionAction, DriftType
@@ -179,6 +181,153 @@ def test_successful_validation_allows_stop() -> None:
     supervisor.process(_write_event(adapter))
     supervisor.process(_validation_event(adapter, 0))
     result = supervisor.process(_stop_event(adapter, "Implementation complete."))
+    assert result.decision.action == DecisionAction.ALLOW
+    assert not result.evidence
+
+
+def test_real_codex_unittest_success_allows_stop_with_default_repo_anchors() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = CodexAdapter()
+    supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "PreToolUse",
+                tool_name="apply_patch",
+                tool_use_id="patch-1",
+                tool_input={"command": "*** Update File: calc.py\n@@"},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+    supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="test-1",
+                tool_input={"command": "python3 -m unittest tests.test_calc"},
+                tool_response=(
+                    ".\n----------------------------------------------------------------------\n"
+                    "Ran 1 test in 0.000s\n\nOK\n"
+                ),
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+    supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="checkpoint-1",
+                tool_input={
+                    "command": (
+                        "python3 work_unit.py checkpoint "
+                        '--summary "python3 -m unittest tests.test_calc passes"'
+                    )
+                },
+                tool_response='{"status":"closed"}',
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(
+        adapter.adapt_event(
+            codex_hook(
+                "Stop",
+                stop_hook_active=False,
+                last_assistant_message="Implementation completed.",
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    assert result.decision.action == DecisionAction.ALLOW
+    assert not result.evidence
+
+
+@pytest.mark.parametrize(
+    "summary_fragment",
+    (
+        "pytest passes",
+        "npm test passes",
+        "cargo test passes",
+        "go test passes",
+        "dotnet test passes",
+    ),
+)
+def test_validation_names_in_command_arguments_do_not_override_success(
+    summary_fragment: str,
+) -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(_validation_event(adapter, 0))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="checkpoint-1",
+                tool_input={
+                    "command": (
+                        f'python3 work_unit.py checkpoint --summary "checks: {summary_fragment}"'
+                    )
+                },
+                tool_response={"stdout": '{"status":"active"}'},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Implementation complete."))
+
+    assert result.decision.action == DecisionAction.ALLOW
+    assert not result.evidence
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "pytest tests",
+        "uv run pytest tests",
+        "python3 -m pytest tests",
+        ".venv/bin/pytest tests",
+        "PYTHONPATH=src pytest tests",
+        "echo preparing && pytest tests",
+        "npm test",
+        "pnpm run test",
+        "cargo test",
+        "go test ./...",
+        "dotnet test",
+    ),
+)
+def test_default_validation_patterns_preserve_real_command_forms(command: str) -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="test-1",
+                tool_input={"command": command},
+                tool_response={"exit_code": 0},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Implementation complete."))
+
     assert result.decision.action == DecisionAction.ALLOW
     assert not result.evidence
 

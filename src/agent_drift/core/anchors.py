@@ -8,6 +8,10 @@ from pydantic import Field, field_validator
 
 from agent_drift.protocol.base import WireModel
 
+_COMMAND_BOUNDARY = r"(?:^|(?:&&|\|\||;)\s*)"
+_ENVIRONMENT_PREFIX = r"(?:env\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]+)\s+)*"
+_PYTHON_EXECUTABLE = r"(?:[^\s;&|]*/)?python(?:3(?:\.\d+)?)?"
+
 
 class TaskAnchor(WireModel):
     goal: str = Field(min_length=1, max_length=32768)
@@ -45,11 +49,12 @@ class PlanAnchor(WireModel):
 
 class RepoAnchor(WireModel):
     validation_command_patterns: tuple[str, ...] = (
-        r"(?:^|\s)pytest(?:\s|$)",
-        r"(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
-        r"(?:^|\s)cargo\s+test(?:\s|$)",
-        r"(?:^|\s)go\s+test(?:\s|$)",
-        r"(?:^|\s)dotnet\s+test(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}(?:uv\s+run\s+)?(?:{_PYTHON_EXECUTABLE}\s+-m\s+)?(?:[^\s;&|]*/)?pytest(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}(?:uv\s+run\s+)?(?:{_PYTHON_EXECUTABLE}\s+-m\s+)?unittest(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}cargo\s+test(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}go\s+test(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}dotnet\s+test(?:\s|$)",
     )
 
     @field_validator("validation_command_patterns")
