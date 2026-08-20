@@ -21,7 +21,7 @@
 - 100% exact match, 0% clean false-positive rate, and no missed expected positives.
 - No new integration surface: OTLP, diagnostics, daemon, Adapters, LLM Judge, and DriftTypes remain out of scope.
 
-## v0.7.1 — Codex production hardening (in progress)
+## v0.7.1 — Codex production hardening (complete)
 
 - Repair private Hook directory and backup permissions on existing installations.
 - Report degraded Hook installations instead of configuration-only false positives.

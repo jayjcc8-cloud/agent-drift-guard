@@ -92,7 +92,9 @@ def _migrate_1_to_2(connection: sqlite3.Connection) -> None:
 
 
 def _migrate_2_to_3(connection: sqlite3.Connection) -> None:
-    connection.execute("CREATE TABLE maintenance (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS maintenance (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
 
 
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {

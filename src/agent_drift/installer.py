@@ -373,18 +373,15 @@ class HookInstaller:
                 )
             if destination.exists():
                 current = GuardAnchors.model_validate_json(destination.read_text(encoding="utf-8"))
-                generated_defaults = (
-                    GuardAnchors(
-                        task=TaskAnchor(goal=_DEFAULT_TASK_GOAL),
-                        repo=_LEGACY_DEFAULT_REPO,
-                    ),
-                    GuardAnchors(
-                        task=TaskAnchor(goal=_DEFAULT_TASK_GOAL),
-                        repo=_V071_DEFAULT_REPO,
-                    ),
-                )
-                if current in generated_defaults:
-                    return GuardAnchors(task=TaskAnchor(goal=_DEFAULT_TASK_GOAL))
+                if current.task.goal == _DEFAULT_TASK_GOAL and current.repo in (
+                    _LEGACY_DEFAULT_REPO,
+                    _V071_DEFAULT_REPO,
+                ):
+                    return GuardAnchors(
+                        task=current.task,
+                        constraints=current.constraints,
+                        plan=current.plan,
+                    )
                 return current
             return GuardAnchors(task=TaskAnchor(goal=_DEFAULT_TASK_GOAL))
         except (OSError, ValueError) as exc:

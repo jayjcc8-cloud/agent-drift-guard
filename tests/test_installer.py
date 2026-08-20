@@ -330,3 +330,57 @@ def test_install_upgrades_the_v071_generated_default_anchors(tmp_path: Path) -> 
     upgraded = json.loads(anchors_path.read_text(encoding="utf-8"))
     patterns = upgraded["repo"]["validation_command_patterns"]
     assert all(r"(?:^|(?:&&|\|\||;)\s*)" in pattern for pattern in patterns)
+
+
+def test_install_preserves_custom_constraints_and_plan_for_generated_default_repo(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    data_root = project / ".agent-drift"
+    data_root.mkdir()
+    anchors_path = data_root / "anchors.json"
+    anchors_path.write_text(
+        json.dumps(
+            {
+                "task": {
+                    "goal": "Keep work aligned with the current user task and validate changes."
+                },
+                "constraints": {
+                    "hard_constraints": ["Do not delete secrets."],
+                    "soft_constraints": ["Run tests when possible."],
+                },
+                "plan": {
+                    "milestones": [
+                        {
+                            "milestone_id": "m1",
+                            "title": "Foundation",
+                        }
+                    ],
+                    "current_milestone": "m1",
+                },
+                "repo": {
+                    "validation_command_patterns": [
+                        r"(?:^|\s)pytest(?:\s|$)",
+                        r"(?:^|(?:&&|\|\||;)\s*)(?:uv\s+run\s+)?(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?unittest(?:\s|$)",
+                        r"(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
+                        r"(?:^|\s)cargo\s+test(?:\s|$)",
+                        r"(?:^|\s)go\s+test(?:\s|$)",
+                        r"(?:^|\s)dotnet\s+test(?:\s|$)",
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+
+    installer.install()
+
+    upgraded = json.loads((data_root / "anchors.json").read_text(encoding="utf-8"))
+    assert upgraded["constraints"]["hard_constraints"] == ["Do not delete secrets."]
+    assert upgraded["constraints"]["soft_constraints"] == ["Run tests when possible."]
+    assert upgraded["plan"]["milestones"][0]["milestone_id"] == "m1"
+    assert upgraded["plan"]["current_milestone"] == "m1"
+    patterns = upgraded["repo"]["validation_command_patterns"]
+    assert all(r"(?:^|(?:&&|\|\||;)\s*)" in pattern for pattern in patterns)

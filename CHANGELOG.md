@@ -4,7 +4,7 @@ This project follows semantic versioning for the Python package and documents op
 
 ## Unreleased
 
-## 0.7.1 - 2026-08-13
+## 0.7.1 - 2026-08-20
 
 - Enforce `0700` on private Hook data and backup directories and `0600` on anchors and
   configuration backups, including repair of existing installations.
@@ -21,6 +21,8 @@ This project follows semantic versioning for the Python package and documents op
 - Anchor all generated validation patterns to real shell command boundaries so command arguments that
   merely mention a test command cannot override successful validation.
 - Repair existing SQLite databases and every regular Hook runtime file to private POSIX permissions.
+- Preserve custom constraint and plan anchors while upgrading generated repository validation defaults.
+- Make the v2-to-v3 SQLite migration tolerate an already-created maintenance table.
 
 ## 0.7.0 - 2026-08-09
 
