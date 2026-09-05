@@ -456,6 +456,34 @@ def test_recognized_validation_with_unknown_result_stays_distinct_from_failure()
     assert "unknown" in evidence.summary.lower()
 
 
+def test_later_shell_error_after_unittest_ok_does_not_clear_validation_drift() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="chained-test",
+                tool_input={"command": "python3 -m unittest ; missing-later-step"},
+                tool_response={
+                    "stdout": "Ran 1 test in 0.001s\n\nOK\n",
+                    "stderr": "/bin/sh: missing-later-step: command not found\n",
+                },
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Implementation complete."))
+
+    evidence = next(item for item in result.evidence if item.drift_type == DriftType.VALIDATION)
+    assert result.decision.action == DecisionAction.CONTINUE
+    assert evidence.facts["latest_validation_outcome"] == "unknown"
+
+
 def test_completion_claim_after_failed_validation_is_state_and_validation_drift() -> None:
     supervisor = Supervisor(anchors())
     adapter = ClaudeCodeAdapter()

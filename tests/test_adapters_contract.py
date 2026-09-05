@@ -185,6 +185,24 @@ def test_claude_stream_only_unittest_result_has_deterministic_outcome(
     assert event.payload["outcome"] == expected
 
 
+def test_unittest_success_before_later_shell_error_is_not_success() -> None:
+    raw = load_fixture("claude", "post_tool_use.json")
+    raw["tool_input"] = {"command": "python3 -m unittest ; missing-later-step"}
+    raw["tool_response"] = {
+        "stdout": "Ran 1 test in 0.001s\n\nOK\n",
+        "stderr": "/bin/sh: missing-later-step: command not found\n",
+    }
+    event = ClaudeCodeAdapter().adapt_event(raw, timestamp=NOW)
+    assert event.payload["outcome"] == "unknown"
+
+
+def test_structured_nonzero_exit_dominates_conflicting_success_flag() -> None:
+    raw = load_fixture("claude", "post_tool_use.json")
+    raw["tool_response"] = {"success": True, "exit_code": 1}
+    event = ClaudeCodeAdapter().adapt_event(raw, timestamp=NOW)
+    assert event.payload["outcome"] == "failure"
+
+
 def test_codex_rejects_claude_only_failure_hook() -> None:
     with pytest.raises(ValueError, match="unsupported codex"):
         CodexAdapter().adapt_event(load_fixture("claude", "post_tool_failure.json"), timestamp=NOW)

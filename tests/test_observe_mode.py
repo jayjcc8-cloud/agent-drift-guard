@@ -175,17 +175,32 @@ def test_runtime_default_remains_legacy_enforce_behavior() -> None:
     assert outcome.response.stdout is not None
 
 
-@pytest.mark.parametrize("failure", ["invalid-json", "missing-anchors", "bad-database"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "invalid-json",
+        "json-null",
+        "json-scalar",
+        "json-array",
+        "missing-anchors",
+        "bad-database",
+    ],
+)
 def test_observe_hook_errors_are_non_intervening_and_sanitized(
     tmp_path: Path, failure: str
 ) -> None:
     hook = tmp_path / "hook.json"
     anchors = tmp_path / "anchors.json"
     database = tmp_path / "drift.db"
+    invalid_documents = {
+        "invalid-json": "{secret-token",
+        "json-null": "null",
+        "json-scalar": '"secret-token"',
+        "json-array": '[["secret-token", "value"]]',
+    }
     hook.write_text(
-        "{secret-token"
-        if failure == "invalid-json"
-        else json.dumps(
+        invalid_documents.get(failure)
+        or json.dumps(
             {
                 "session_id": "s1",
                 "turn_id": "t1",
@@ -232,6 +247,30 @@ def test_non_hook_validation_error_still_returns_two(tmp_path: Path) -> None:
     invalid.write_text("{not-json", encoding="utf-8")
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         assert main(["validate-event", str(invalid)]) == 2
+
+
+def test_enforce_hook_schema_error_still_returns_two(tmp_path: Path) -> None:
+    invalid = tmp_path / "invalid.json"
+    anchors = tmp_path / "anchors.json"
+    invalid.write_text("null", encoding="utf-8")
+    anchors.write_text(json.dumps({"task": {"goal": "Enforce."}}), encoding="utf-8")
+    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        assert (
+            main(
+                [
+                    "hook",
+                    "codex",
+                    str(invalid),
+                    "--mode",
+                    "enforce",
+                    "--database",
+                    str(tmp_path / "drift.db"),
+                    "--anchors",
+                    str(anchors),
+                ]
+            )
+            == 2
+        )
 
 
 def test_observe_export_failure_reports_only_sanitized_degradation(tmp_path: Path) -> None:
