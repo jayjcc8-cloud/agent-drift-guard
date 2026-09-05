@@ -50,7 +50,7 @@ from agent_drift.replay import (
     run_replay,
     write_replay_cases,
 )
-from agent_drift.runtime import AgentDriftRuntime, RuntimeOutcome
+from agent_drift.runtime import AgentDriftRuntime, RuntimeMode, RuntimeOutcome
 from agent_drift.store import (
     EventStore,
     PruneResult,
@@ -98,6 +98,7 @@ __all__ = [
     "ReplayReport",
     "RepoAnchor",
     "RetentionPolicy",
+    "RuntimeMode",
     "RuntimeOutcome",
     "SQLiteStore",
     "Severity",

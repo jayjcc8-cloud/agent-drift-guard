@@ -37,6 +37,11 @@ class ValidationDetector(Detector):
             severity = Severity.HIGH
             score = 0.95
             facts: dict[str, JsonValue] = {"latest_validation_outcome": "failure"}
+        elif validations:
+            summary = "Agent is stopping while the latest validation outcome is unknown."
+            severity = Severity.MEDIUM
+            score = 0.75
+            facts = {"latest_validation_outcome": "unknown"}
         else:
             summary = "Agent is stopping after repository writes without successful validation."
             severity = Severity.MEDIUM

@@ -4,6 +4,19 @@ This project follows semantic versioning for the Python package and documents op
 
 ## Unreleased
 
+- Add explicit `observe` and `enforce` Hook runtime modes. Observation retains detector evidence
+  and the proposed `GuardDecision` while applying an empty, exit-zero native response.
+- Make catchable observe-path input, anchor, store, and exporter failures non-intervening with
+  bounded diagnostics; non-Hook CLI failures retain their normal nonzero exits.
+- Generate new Hook installations with explicit observe runners, preserve detected legacy/enforce
+  modes on reinstall, and require an explicit mode when a damaged installation is ambiguous.
+- Recognize locked uv pytest/unittest commands, keep configured wrapper commands opt-in, reject
+  quoted/comment/background lookalikes, and preserve success/failure/unknown result distinctions.
+- Isolate bounded detector history by existing platform, repository, session, and actor fields while
+  retaining shared constraint enforcement and marking absent native actor identifiers as unknown.
+- Add an installed-wheel fixture that exercises temporary install, status, nested runner execution,
+  SQLite evidence persistence, and uninstall outside the source checkout.
+
 ## 0.7.1 - 2026-08-20
 
 - Enforce `0700` on private Hook data and backup directories and `0600` on anchors and

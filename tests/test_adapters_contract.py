@@ -154,6 +154,21 @@ def test_codex_plain_text_without_unittest_terminator_remains_unknown() -> None:
 
 
 @pytest.mark.parametrize(
+    "text",
+    (
+        "1 passed in 0.01s",
+        "the documentation says tests passed",
+        "OK appears here but not as a unittest terminal line",
+    ),
+)
+def test_unstructured_success_words_do_not_become_validation_success(text: str) -> None:
+    raw = load_fixture("codex", "post_tool_use.json")
+    raw["tool_response"] = text
+    event = CodexAdapter().adapt_event(raw, timestamp=NOW)
+    assert event.payload["outcome"] == "unknown"
+
+
+@pytest.mark.parametrize(
     ("terminal_status", "expected"),
     [("OK", "success"), ("FAILED (failures=1)", "failure")],
 )

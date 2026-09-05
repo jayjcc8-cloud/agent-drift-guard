@@ -11,6 +11,7 @@ from agent_drift.protocol.base import WireModel
 _COMMAND_BOUNDARY = r"(?:^|(?:&&|\|\||;)\s*)"
 _ENVIRONMENT_PREFIX = r"(?:env\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]+)\s+)*"
 _PYTHON_EXECUTABLE = r"(?:[^\s;&|]*/)?python(?:3(?:\.\d+)?)?"
+_UV_RUN_PREFIX = r"(?:uv\s+run(?:\s+--locked)?\s+)?"
 
 
 class TaskAnchor(WireModel):
@@ -49,8 +50,8 @@ class PlanAnchor(WireModel):
 
 class RepoAnchor(WireModel):
     validation_command_patterns: tuple[str, ...] = (
-        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}(?:uv\s+run\s+)?(?:{_PYTHON_EXECUTABLE}\s+-m\s+)?(?:[^\s;&|]*/)?pytest(?:\s|$)",
-        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}(?:uv\s+run\s+)?(?:{_PYTHON_EXECUTABLE}\s+-m\s+)?unittest(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}{_UV_RUN_PREFIX}(?:{_PYTHON_EXECUTABLE}\s+-m\s+)?(?:[^\s;&|]*/)?pytest(?:\s|$)",
+        rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}{_UV_RUN_PREFIX}(?:{_PYTHON_EXECUTABLE}\s+-m\s+)?unittest(?:\s|$)",
         rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?:\s|$)",
         rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}cargo\s+test(?:\s|$)",
         rf"{_COMMAND_BOUNDARY}{_ENVIRONMENT_PREFIX}go\s+test(?:\s|$)",

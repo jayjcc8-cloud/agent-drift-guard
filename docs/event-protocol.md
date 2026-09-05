@@ -12,6 +12,7 @@ session、agent、时间和 JSON payload；其他字段用于可靠的顺序及�
 | `event_type` | 标准生命周期类型 |
 | `platform` | 平台稳定标识，如 `codex` |
 | `session_id` | 平台 session 映射后的稳定标识 |
+| `agent_id` | 工具行为所属 actor；原生字段缺失时 Adapter 使用 `unknown`，不推断为 main |
 | `sequence` | Adapter 在一个 session 内生成的单调序号 |
 | `parent_event_id` | 因果父事件，例如 tool result 指向 tool before |
 | `trace_id` | 可选的跨进程/OTEL 关联标识 |
@@ -49,6 +50,8 @@ Core 字段采用严格校验，未知字段会报错；这是为了尽早发现
 
 同一个 session 优先按 `sequence` 排序。缺失 sequence 时才使用 timestamp；timestamp 必须带
 时区。并发 subagent 的全局顺序不能只由时间推断，应通过 `parent_event_id`/`trace_id` 保留因果关系。
+`SubagentStop.agent_id` 描述正在停止的子 Agent；它不等同于父 Agent 的 actor 身份。当前 Supervisor
+在 session 内使用 platform/repo/agent 做检测上下文分区，但不会把这个分区扩展成新的任务状态系统。
 
 ## payload 约束
 

@@ -248,7 +248,7 @@ def build_event(
 
     session_id = required_string(raw, "session_id")
     turn_id = optional_string(raw, "turn_id") or optional_string(raw, "prompt_id")
-    agent_id = optional_string(raw, "agent_id") or "main"
+    agent_id = optional_string(raw, "agent_id") or "unknown"
     cwd = required_string(raw, "cwd")
 
     common_keys = {

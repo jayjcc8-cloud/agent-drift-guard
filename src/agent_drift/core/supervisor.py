@@ -54,6 +54,20 @@ class Supervisor:
         )
         self._sequences: dict[str, int] = defaultdict(int)
 
+    @staticmethod
+    def _detection_history(
+        event: AgentEvent, history: tuple[AgentEvent, ...]
+    ) -> tuple[AgentEvent, ...]:
+        """Keep actor-local evidence inside the bounded session history."""
+
+        return tuple(
+            prior
+            for prior in history
+            if prior.platform == event.platform
+            and prior.repo_root == event.repo_root
+            and prior.agent_id == event.agent_id
+        )
+
     def process(self, event: AgentEvent) -> SupervisionResult:
         event.assert_supported()
         if self._store is not None:
@@ -68,6 +82,7 @@ class Supervisor:
                 before_sequence=event.sequence,
                 limit=self._history_limit,
             )
+            history = self._detection_history(event, history)
             context = DetectionContext(event=event, history=history, anchors=self._anchors)
             evidence = tuple(
                 item for detector in self._detectors for item in detector.detect(context)
@@ -84,6 +99,7 @@ class Supervisor:
             self._sequences[event.session_id], (event.sequence or 0) + 1
         )
         history = tuple(self._history[event.session_id])
+        history = self._detection_history(event, history)
         context = DetectionContext(event=event, history=history, anchors=self._anchors)
         evidence = tuple(item for detector in self._detectors for item in detector.detect(context))
         decision = self._policy.decide(event, evidence)

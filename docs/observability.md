@@ -7,6 +7,11 @@
 - `supervision`：规范化事件、Detector evidence 和抽象 decision；
 - `response`：实际应用到平台的动作和原生 Hook 输出。
 
+在 observe 模式中，`supervision.decision` 继续记录 Policy 原本提出的动作，`response` 则明确记录
+`applied_action="observe"`、空 stdout/stderr 与 exit 0。两者不能合并成一批伪造的 `ALLOW`。observe
+路径可捕获的配置、输入、存储或 exporter 故障只向操作日志写入固定、脱敏的 unavailable/failed
+诊断；它不输出权限决定或继续指令，也不把观测失败报告成“没有漂移”。
+
 当前提供 `JsonlExporter` 和 `CompositeExporter`。JSONL 默认最多使用约 128 MiB（32 MiB 当前文件加
 3 个备份），单条记录上限 1 MiB；跨 Hook 进程轮转由文件锁串行化。API 使用示例：
 

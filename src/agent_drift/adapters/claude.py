@@ -44,7 +44,7 @@ class ClaudeCodeAdapter(PlatformAdapter):
         return PlatformCapabilities(
             platform="claude-code",
             platform_version=self._platform_version,
-            adapter_version="0.7.1",
+            adapter_version="0.8.0",
             capabilities=frozenset(
                 {
                     Capability.OBSERVE_SESSION,
