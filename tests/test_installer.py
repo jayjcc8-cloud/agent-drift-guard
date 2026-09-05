@@ -65,6 +65,8 @@ def test_codex_install_is_idempotent_and_preserves_existing_hooks(tmp_path: Path
     assert str(installer.executable) not in command
     assert "git rev-parse --show-toplevel" in command
     assert str(installer.executable) in installer.runner_path.read_text(encoding="utf-8")
+    assert "--mode observe" in installer.runner_path.read_text(encoding="utf-8")
+    assert result.mode == "observe"
     assert installer.runner_path.stat().st_mode & 0o777 == 0o700
     assert (project / ".agent-drift/anchors.json").exists()
     assert ".agent-drift/" in (project / ".gitignore").read_text(encoding="utf-8")
@@ -77,7 +79,9 @@ def test_codex_install_is_idempotent_and_preserves_existing_hooks(tmp_path: Path
 
     second = installer.install()
     assert second.changed is False
-    assert installer.status().installed_events == tuple(sorted(result.installed_events))
+    status = installer.status()
+    assert status.installed_events == tuple(sorted(result.installed_events))
+    assert status.mode == "observe"
 
     removed = installer.uninstall()
     assert removed.changed is True
@@ -111,6 +115,77 @@ def test_install_dry_run_does_not_touch_project(tmp_path: Path) -> None:
     assert result.changed is True
     assert not installer.config_path.exists()
     assert not installer.data_root.exists()
+
+
+def test_existing_legacy_install_is_recognized_and_not_silently_changed(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installer.install()
+    observe_runner = installer.runner_path.read_text(encoding="utf-8")
+    legacy_runner = observe_runner.replace("# AGENT_DRIFT_MODE=observe\n", "").replace(
+        " --mode observe", ""
+    )
+    installer.runner_path.write_text(legacy_runner, encoding="utf-8")
+    installer.runner_path.chmod(0o700)
+
+    before = installer.status()
+    reinstall = installer.install()
+
+    assert before.mode == "legacy"
+    assert before.healthy is True
+    assert reinstall.mode == "legacy"
+    assert reinstall.changed is False
+    assert installer.runner_path.read_text(encoding="utf-8") == legacy_runner
+
+
+def test_existing_enforce_install_is_preserved_until_explicit_mode_change(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installed = installer.install(mode="enforce")
+    enforce_runner = installer.runner_path.read_text(encoding="utf-8")
+
+    unchanged = installer.install()
+    preview = installer.install(mode="observe", dry_run=True)
+
+    assert installed.mode == "enforce"
+    assert "--mode enforce" in enforce_runner
+    assert unchanged.changed is False
+    assert unchanged.mode == "enforce"
+    assert preview.changed is True
+    assert preview.mode == "observe"
+    assert installer.runner_path.read_text(encoding="utf-8") == enforce_runner
+
+    changed = installer.install(mode="observe")
+    assert changed.changed is True
+    assert changed.mode == "observe"
+    assert installer.status().mode == "observe"
+    assert "--mode observe" in installer.runner_path.read_text(encoding="utf-8")
+
+
+def test_damaged_observe_runner_is_unhealthy_and_requires_explicit_repair(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    initialize_git(project)
+    installer = HookInstaller("codex", project, executable=executable(tmp_path))
+    installer.install()
+    runner = installer.runner_path.read_text(encoding="utf-8")
+    installer.runner_path.write_text(runner.replace(" --mode observe", ""), encoding="utf-8")
+    installer.runner_path.chmod(0o700)
+
+    status = installer.status()
+
+    assert status.mode == "unknown"
+    assert status.healthy is False
+    assert "unknown Hook runtime mode" in status.health_issues
+    with pytest.raises(HookInstallError, match="explicit --mode"):
+        installer.install()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink behavior differs on Windows")
@@ -172,6 +247,12 @@ def test_status_reports_a_missing_runner_as_unhealthy(tmp_path: Path) -> None:
     assert len(result.installed_events) == 11
     assert result.healthy is False
     assert "missing Hook runner" in result.health_issues
+    with pytest.raises(HookInstallError, match="explicit --mode"):
+        installer.install()
+
+    repaired = installer.install(mode="observe")
+    assert repaired.mode == "observe"
+    assert installer.status().healthy is True
 
 
 def test_status_rejects_tampered_and_duplicate_managed_handlers(tmp_path: Path) -> None:

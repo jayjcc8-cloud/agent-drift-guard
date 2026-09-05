@@ -17,6 +17,8 @@ from agent_drift.core import GuardAnchors, RepoAnchor, TaskAnchor
 from agent_drift.protocol.base import WireModel
 
 PlatformName = Literal["codex", "claude-code"]
+HookMode = Literal["enforce", "observe"]
+InstalledHookMode = Literal["enforce", "observe", "legacy", "unknown"]
 _MARKER = "AGENT_DRIFT_GUARD=1"
 _DEFAULT_TASK_GOAL = "Keep work aligned with the current user task and validate changes."
 _LEGACY_DEFAULT_REPO = RepoAnchor(
@@ -86,6 +88,7 @@ class HookInstallResult(WireModel):
     gitignore_updated: bool = False
     healthy: bool | None = None
     health_issues: tuple[str, ...] = ()
+    mode: InstalledHookMode | None = None
 
 
 def _is_agent_drift_handler(handler: Any) -> bool:
@@ -228,33 +231,77 @@ class HookInstaller:
             elif path.is_file():
                 os.chmod(path, 0o700 if path == self.runner_path else 0o600)
 
-    def _runner_document(self) -> str:
-        values = (
+    def _runner_document(self, mode: HookMode | Literal["legacy"]) -> str:
+        values = [
             str(self.executable),
             "hook",
             self.platform,
             "-",
-            "--database",
-            str(self.data_root / "drift.db"),
-            "--anchors",
-            str(self.data_root / "anchors.json"),
-            "--repo-root",
-            str(self.project_root),
-            "--telemetry-jsonl",
-            str(self.data_root / "observations.jsonl"),
-        )
-        return "#!/bin/sh\nexec " + " ".join(shlex.quote(value) for value in values) + "\n"
-
-    def _runner_changed(self) -> bool:
-        try:
-            return (
-                not self.runner_path.exists()
-                or self.runner_path.read_text(encoding="utf-8") != self._runner_document()
+        ]
+        if mode != "legacy":
+            values.extend(("--mode", mode))
+        values.extend(
+            (
+                "--database",
+                str(self.data_root / "drift.db"),
+                "--anchors",
+                str(self.data_root / "anchors.json"),
+                "--repo-root",
+                str(self.project_root),
+                "--telemetry-jsonl",
+                str(self.data_root / "observations.jsonl"),
             )
+        )
+        marker = "" if mode == "legacy" else f"# AGENT_DRIFT_MODE={mode}\n"
+        return (
+            "#!/bin/sh\n"
+            + marker
+            + "exec "
+            + " ".join(shlex.quote(value) for value in values)
+            + "\n"
+        )
+
+    def _runner_mode(self) -> InstalledHookMode | None:
+        if not self.runner_path.is_file():
+            return None
+        try:
+            lines = self.runner_path.read_text(encoding="utf-8").splitlines()
+            if not lines or lines[0] != "#!/bin/sh":
+                return "unknown"
+            marker: str | None = None
+            if len(lines) == 2:
+                command_line = lines[1]
+            elif len(lines) == 3 and lines[1].startswith("# AGENT_DRIFT_MODE="):
+                marker = lines[1].partition("=")[2]
+                command_line = lines[2]
+            else:
+                return "unknown"
+            if not command_line.startswith("exec "):
+                return "unknown"
+            values = shlex.split(command_line[len("exec ") :])
+        except (OSError, ValueError):
+            return "unknown"
+        indexes = [index for index, value in enumerate(values) if value == "--mode"]
+        if not indexes:
+            return "legacy" if marker is None else "unknown"
+        if len(indexes) != 1 or indexes[0] + 1 >= len(values):
+            return "unknown"
+        value = values[indexes[0] + 1]
+        if value == "observe" and marker == "observe":
+            return "observe"
+        if value == "enforce" and marker == "enforce":
+            return "enforce"
+        return "unknown"
+
+    def _runner_changed(self, mode: HookMode | Literal["legacy"]) -> bool:
+        try:
+            return not self.runner_path.exists() or self.runner_path.read_text(
+                encoding="utf-8"
+            ) != self._runner_document(mode)
         except OSError as exc:
             raise HookInstallError(f"failed to inspect Hook runner: {exc}") from exc
 
-    def _write_runner(self) -> None:
+    def _write_runner(self, mode: HookMode | Literal["legacy"]) -> None:
         self._ensure_private_directory(self.runner_path.parent)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{self.runner_path.name}.", dir=self.runner_path.parent
@@ -262,7 +309,7 @@ class HookInstaller:
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                stream.write(self._runner_document())
+                stream.write(self._runner_document(mode))
                 stream.flush()
                 os.fsync(stream.fileno())
             os.chmod(temporary, 0o700)
@@ -310,6 +357,22 @@ class HookInstaller:
                 updated["hooks"] = remaining
                 output.append(updated)
         return output
+
+    @staticmethod
+    def _has_agent_drift_handlers(document: dict[str, Any]) -> bool:
+        hooks = document.get("hooks")
+        if not isinstance(hooks, dict):
+            return False
+        return any(
+            _is_agent_drift_handler(handler)
+            for groups in hooks.values()
+            if isinstance(groups, list)
+            for group in groups
+            if isinstance(group, dict)
+            for handlers in (group.get("hooks"),)
+            if isinstance(handlers, list)
+            for handler in handlers
+        )
 
     def _merged_config(self, *, install: bool) -> tuple[dict[str, Any], tuple[str, ...]]:
         document = self._read_config()
@@ -429,11 +492,26 @@ class HookInstaller:
         *,
         anchors: str | Path | None = None,
         dry_run: bool = False,
+        mode: HookMode | None = None,
     ) -> HookInstallResult:
         updated, installed = self._merged_config(install=True)
         current = self._read_config()
+        current_mode = self._runner_mode()
+        if mode is None:
+            if current_mode == "unknown":
+                raise HookInstallError(
+                    "unknown Hook runtime mode; pass an explicit --mode to repair it"
+                )
+            if current_mode is None and self._has_agent_drift_handlers(current):
+                raise HookInstallError(
+                    "existing Hook runtime mode cannot be determined; pass an explicit --mode "
+                    "to repair it"
+                )
+            effective_mode: HookMode | Literal["legacy"] = current_mode or "observe"
+        else:
+            effective_mode = mode
         config_changed = updated != current
-        runner_changed = self._runner_changed()
+        runner_changed = self._runner_changed(effective_mode)
         anchors_document = self._load_anchors(anchors)
         anchors_changed = self._anchors_changed(anchors_document)
         gitignore_changed = bool(self._missing_gitignore_entries())
@@ -457,7 +535,7 @@ class HookInstaller:
             if anchors_changed:
                 self._write_anchors(anchors_document)
             if runner_changed:
-                self._write_runner()
+                self._write_runner(effective_mode)
             if config_changed:
                 self._write_config(updated)
             self._secure_private_layout()
@@ -469,9 +547,11 @@ class HookInstaller:
             installed_events=installed,
             backup_path=str(backup) if backup else None,
             gitignore_updated=gitignore_updated,
+            mode=effective_mode,
         )
 
     def uninstall(self, *, dry_run: bool = False) -> HookInstallResult:
+        current_mode = self._runner_mode()
         updated, _ = self._merged_config(install=False)
         current = self._read_config()
         changed = updated != current
@@ -487,6 +567,7 @@ class HookInstaller:
             installed_events=(),
             backup_path=str(backup) if backup else None,
             review_required=False,
+            mode=current_mode,
         )
 
     def status(self) -> HookInstallResult:
@@ -512,6 +593,7 @@ class HookInstaller:
                     installed.append(event_name)
                     managed_handlers[event_name] = event_handlers
         issues: list[str] = []
+        mode = self._runner_mode()
         missing_events = sorted(set(_EVENTS[self.platform]) - set(installed))
         if missing_events:
             issues.append("missing Hook handlers: " + ", ".join(missing_events))
@@ -532,7 +614,9 @@ class HookInstaller:
             issues.append("Hook runner is not a regular file")
         elif not os.access(self.runner_path, os.X_OK):
             issues.append("Hook runner is not executable")
-        elif self._runner_changed():
+        elif mode == "unknown":
+            issues.append("unknown Hook runtime mode")
+        elif mode is not None and self._runner_changed(mode):
             issues.append("Hook runner does not match the current installation")
         anchors_path = self.data_root / "anchors.json"
         if not anchors_path.is_file():
@@ -556,4 +640,5 @@ class HookInstaller:
             review_required=bool(issues),
             healthy=not issues,
             health_issues=tuple(issues),
+            mode=mode,
         )

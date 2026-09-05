@@ -12,7 +12,9 @@ Supervisor 不读取 Codex/Claude 字段，也不生成平台决策。它为缺�
 
 `AgentDriftRuntime` 是外层组合器：持有一个 Adapter 和一个 Supervisor，将 native JSON 一次完成
 规范化、检测、决策和原生 Hook 回译。它适合嵌入 daemon、IDE host 或测试进程，同时保持 Core
-对平台模块的单向依赖边界。
+对平台模块的单向依赖边界。`mode="enforce"` 是低层 API 的历史默认值；`mode="observe"` 保留
+`SupervisionResult.decision` 作为 proposed decision，但把实际 `HookResponse.applied_action` 记为
+`observe` 并不输出任何原生控制字段。
 
 ## 当前 Detector
 
@@ -33,6 +35,10 @@ Supervisor 不读取 Codex/Claude 字段，也不生成平台决策。它为缺�
 - Shell 可能间接写文件，但没有可靠路径证据时 Scope Detector 不猜测。
 - 未识别的测试输出标记为 `unknown`，不能当成成功。
 - 成功验证必须发生在最后一次已知写入之后。
+- 检测历史在同一 session 的有界窗口内按 platform、repo 和 `agent_id` 过滤；父子 Agent 的写入与
+  验证不能互证，但当前事件上的共同 forbidden 约束仍对每个 actor 生效。
+- 宿主未提供可靠 actor 时 Adapter 记录 `unknown`，不会猜成 main；多个缺失 actor 的来源仍无法
+  进一步区分。历史截断外的事实属于 coverage limitation，不通过无界扫描补齐。
 - Goal/Plan/Decision drift 尚未用关键字硬判；这些需要显式 plan signal 或语义 Judge。
 
 ## 持久化模式

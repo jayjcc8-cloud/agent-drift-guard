@@ -139,6 +139,15 @@ def _parser() -> argparse.ArgumentParser:
     hook.add_argument("--anchors", required=True)
     hook.add_argument("--repo-root")
     hook.add_argument("--platform-version")
+    hook.add_argument(
+        "--mode",
+        choices=("enforce", "observe"),
+        default="enforce",
+        help=(
+            "host action mode; omitted mode preserves the legacy enforcing behavior, "
+            "while observe records proposed decisions without intervening"
+        ),
+    )
     hook.add_argument("--redaction-policy", help="optional RedactionPolicy JSON file")
     hook.add_argument("--telemetry-jsonl", help="append sanitized observations as JSONL")
     hook.add_argument("--telemetry-max-bytes", type=int, default=32 * 1024 * 1024)
@@ -192,6 +201,14 @@ def _parser() -> argparse.ArgumentParser:
         installer.add_argument("--executable")
         if name == "install-hooks":
             installer.add_argument("--anchors")
+            installer.add_argument(
+                "--mode",
+                choices=("enforce", "observe"),
+                help=(
+                    "explicit runtime mode; new installs default to observe, while an "
+                    "existing installation keeps its detected effective mode"
+                ),
+            )
         if name != "hook-status":
             installer.add_argument("--dry-run", action="store_true")
     return parser
@@ -235,43 +252,58 @@ def main(argv: list[str] | None = None) -> int:
             )
             _write_model(prune_result)
         elif args.command == "hook":
-            adapter = _adapter(args.platform, args.platform_version)
-            anchors = GuardAnchors.model_validate(_read_json(args.anchors))
-            redaction_policy = (
-                RedactionPolicy.model_validate(_read_json(args.redaction_policy))
-                if args.redaction_policy
-                else RedactionPolicy()
-            )
-            runtime = AgentDriftRuntime(
-                adapter,
-                Supervisor(
-                    anchors,
-                    store=SQLiteStore(args.database, redaction_policy=redaction_policy),
-                ),
-                exporter=(
-                    JsonlExporter(
-                        args.telemetry_jsonl,
-                        max_bytes=args.telemetry_max_bytes,
-                        backup_count=args.telemetry_backups,
-                        max_record_bytes=args.telemetry_max_record_bytes,
-                    )
-                    if args.telemetry_jsonl
-                    else None
-                ),
-            )
-            outcome = runtime.handle(
-                _read_json(args.path),
-                repo_root=args.repo_root,
-            )
+            try:
+                adapter = _adapter(args.platform, args.platform_version)
+                anchors = GuardAnchors.model_validate(_read_json(args.anchors))
+                redaction_policy = (
+                    RedactionPolicy.model_validate(_read_json(args.redaction_policy))
+                    if args.redaction_policy
+                    else RedactionPolicy()
+                )
+                runtime = AgentDriftRuntime(
+                    adapter,
+                    Supervisor(
+                        anchors,
+                        store=SQLiteStore(args.database, redaction_policy=redaction_policy),
+                    ),
+                    exporter=(
+                        JsonlExporter(
+                            args.telemetry_jsonl,
+                            max_bytes=args.telemetry_max_bytes,
+                            backup_count=args.telemetry_backups,
+                            max_record_bytes=args.telemetry_max_record_bytes,
+                        )
+                        if args.telemetry_jsonl
+                        else None
+                    ),
+                    mode=args.mode,
+                )
+                outcome = runtime.handle(
+                    _read_json(args.path),
+                    repo_root=args.repo_root,
+                )
+            except (
+                OSError,
+                json.JSONDecodeError,
+                ValidationError,
+                ValueError,
+                RuntimeError,
+            ):
+                if args.mode != "observe":
+                    raise
+                print("agent-drift: observation unavailable", file=sys.stderr)
+                return 0
             if outcome.response.stdout is not None:
                 print(json.dumps(outcome.response.stdout, ensure_ascii=False))
             if outcome.response.stderr:
                 print(outcome.response.stderr, file=sys.stderr)
             if outcome.export_error:
-                print(
-                    f"agent-drift: telemetry export failed: {outcome.export_error}",
-                    file=sys.stderr,
+                message = (
+                    "agent-drift: observation export failed"
+                    if args.mode == "observe"
+                    else f"agent-drift: telemetry export failed: {outcome.export_error}"
                 )
+                print(message, file=sys.stderr)
             return outcome.response.exit_code
         elif args.command == "telemetry-status":
             _write_model(JsonlExporter(args.path, backup_count=args.backup_count).status())
@@ -332,6 +364,7 @@ def main(argv: list[str] | None = None) -> int:
                 install_result = installer.install(
                     anchors=args.anchors,
                     dry_run=args.dry_run,
+                    mode=args.mode,
                 )
             elif args.command == "uninstall-hooks":
                 install_result = installer.uninstall(dry_run=args.dry_run)

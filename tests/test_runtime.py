@@ -9,8 +9,46 @@ from agent_drift import (
     Supervisor,
     TaskAnchor,
 )
+from agent_drift.observability import ObservationEnvelope
 
 NOW = datetime(2026, 8, 8, tzinfo=UTC)
+
+
+class FailingExporter:
+    def export(self, observation: ObservationEnvelope) -> None:
+        raise OSError("secret path /private/project and raw prompt")
+
+
+def test_observe_export_failure_keeps_neutral_response_and_proposed_decision() -> None:
+    anchors = GuardAnchors(
+        task=TaskAnchor(goal="Only edit application code."),
+        constraints=ConstraintAnchor(allowed_write_paths=("src/**",)),
+    )
+    runtime = AgentDriftRuntime(
+        CodexAdapter(),
+        Supervisor(anchors),
+        exporter=FailingExporter(),
+        mode="observe",
+    )
+    outcome = runtime.handle(
+        {
+            "session_id": "s1",
+            "turn_id": "t1",
+            "agent_id": "main",
+            "cwd": "/project",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "apply_patch",
+            "tool_use_id": "patch-1",
+            "tool_input": {"command": "*** Update File: infra/prod.tf\n@@"},
+        },
+        timestamp=NOW,
+        repo_root="/project",
+    )
+    assert outcome.supervision.decision.action.value == "block"
+    assert outcome.response.stdout is None
+    assert outcome.response.exit_code == 0
+    assert outcome.response.applied_action == "observe"
+    assert outcome.export_error is not None
 
 
 def test_codex_runtime_blocks_out_of_scope_patch_end_to_end() -> None:

@@ -11,6 +11,12 @@ from agent_drift.protocol.events import AgentEvent, EventType
 Renderer = Callable[[AgentEvent, GuardDecision, DecisionAction], HookResponse | None]
 
 
+def observation_response() -> HookResponse:
+    """Return no native decision so the host keeps its normal control flow."""
+
+    return HookResponse(applied_action="observe")
+
+
 def render_with_fallback(
     event: AgentEvent, decision: GuardDecision, renderer: Renderer
 ) -> HookResponse:

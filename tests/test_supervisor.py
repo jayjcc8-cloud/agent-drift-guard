@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from agent_drift.adapters import ClaudeCodeAdapter, CodexAdapter
-from agent_drift.core import ConstraintAnchor, GuardAnchors, Supervisor, TaskAnchor
+from agent_drift.core import ConstraintAnchor, GuardAnchors, RepoAnchor, Supervisor, TaskAnchor
 from agent_drift.protocol.decisions import DecisionAction, DriftType
 
 NOW = datetime(2026, 8, 8, tzinfo=UTC)
@@ -296,8 +296,13 @@ def test_validation_names_in_command_arguments_do_not_override_success(
     "command",
     (
         "pytest tests",
+        "pytest -q",
         "uv run pytest tests",
+        "uv run pytest -q",
+        "uv run --locked pytest -q",
+        "UV_PROJECT_ENVIRONMENT=venv uv run --locked pytest -q",
         "python3 -m pytest tests",
+        "python3 -m unittest discover -s tests -v",
         ".venv/bin/pytest tests",
         "PYTHONPATH=src pytest tests",
         "echo preparing && pytest tests",
@@ -330,6 +335,153 @@ def test_default_validation_patterns_preserve_real_command_forms(command: str) -
 
     assert result.decision.action == DecisionAction.ALLOW
     assert not result.evidence
+
+
+def test_explicit_validation_wrapper_is_recognized_only_when_configured() -> None:
+    configured = GuardAnchors(
+        task=TaskAnchor(goal="Implement and validate."),
+        repo=RepoAnchor(
+            validation_command_patterns=(
+                r"^uv run --no-project --python 3\.12 python scripts/verify\.py --profile full$",
+            )
+        ),
+    )
+    supervisor = Supervisor(configured)
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="verify-1",
+                tool_input={
+                    "command": (
+                        "uv run --no-project --python 3.12 python scripts/verify.py --profile full"
+                    )
+                },
+                tool_response={"exit_code": 0},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Implementation complete."))
+
+    assert result.decision.action == DecisionAction.ALLOW
+    assert not result.evidence
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        'echo "pytest -q"',
+        "# pytest -q",
+        "'pytest -q'",
+        'echo "preparing && pytest -q"',
+        "pytest -q &",
+    ),
+)
+def test_non_executed_or_background_test_text_is_not_validation(command: str) -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="not-validation",
+                tool_input={"command": command},
+                tool_response={"exit_code": 0},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Work remains incomplete."))
+
+    assert result.decision.action == DecisionAction.CONTINUE
+    assert {item.drift_type for item in result.evidence} == {DriftType.VALIDATION}
+
+
+def test_successful_validation_before_a_new_write_does_not_validate_latest_change() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(_validation_event(adapter, 0))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PreToolUse",
+                tool_name="Write",
+                tool_use_id="write-2",
+                tool_input={"file_path": "/project/src/auth.py", "content": "new change"},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Work remains incomplete."))
+
+    assert result.decision.action == DecisionAction.CONTINUE
+    assert {item.drift_type for item in result.evidence} == {DriftType.VALIDATION}
+
+
+def test_recognized_validation_with_unknown_result_stays_distinct_from_failure() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="unknown-test",
+                tool_input={"command": "pytest -q"},
+                tool_response={"stdout": "1 passed, but no structured exit status"},
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Work remains incomplete."))
+
+    evidence = next(item for item in result.evidence if item.drift_type == DriftType.VALIDATION)
+    assert evidence.facts["latest_validation_outcome"] == "unknown"
+    assert "unknown" in evidence.summary.lower()
+
+
+def test_later_shell_error_after_unittest_ok_does_not_clear_validation_drift() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(_write_event(adapter))
+    supervisor.process(
+        adapter.adapt_event(
+            claude_hook(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_use_id="chained-test",
+                tool_input={"command": "python3 -m unittest ; missing-later-step"},
+                tool_response={
+                    "stdout": "Ran 1 test in 0.001s\n\nOK\n",
+                    "stderr": "/bin/sh: missing-later-step: command not found\n",
+                },
+            ),
+            timestamp=NOW,
+            repo_root="/project",
+        )
+    )
+
+    result = supervisor.process(_stop_event(adapter, "Implementation complete."))
+
+    evidence = next(item for item in result.evidence if item.drift_type == DriftType.VALIDATION)
+    assert result.decision.action == DecisionAction.CONTINUE
+    assert evidence.facts["latest_validation_outcome"] == "unknown"
 
 
 def test_completion_claim_after_failed_validation_is_state_and_validation_drift() -> None:
@@ -387,3 +539,199 @@ def test_supervisor_assigns_monotonic_sequence_and_bounds_history() -> None:
         sequences.append(result.event.sequence)
     assert sequences == [0, 1, 2]
     assert len(supervisor.history("s1")) == 2
+
+
+def _actor_event(
+    adapter: ClaudeCodeAdapter,
+    event: str,
+    agent_id: str,
+    *,
+    repo_root: str = "/project",
+    **values: Any,
+) -> Any:
+    return adapter.adapt_event(
+        claude_hook(event, agent_id=agent_id, **values),
+        timestamp=NOW,
+        repo_root=repo_root,
+    )
+
+
+def test_child_validation_cannot_validate_parent_write_in_shared_session() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(
+        _actor_event(
+            adapter,
+            "PreToolUse",
+            "parent",
+            tool_name="Write",
+            tool_use_id="parent-write",
+            tool_input={"file_path": "/project/src/auth.py", "content": "changed"},
+        )
+    )
+    supervisor.process(
+        _actor_event(
+            adapter,
+            "PostToolUse",
+            "child",
+            tool_name="Bash",
+            tool_use_id="child-test",
+            tool_input={"command": "pytest -q"},
+            tool_response={"exit_code": 0},
+        )
+    )
+
+    result = supervisor.process(
+        _actor_event(
+            adapter,
+            "Stop",
+            "parent",
+            stop_hook_active=False,
+            last_assistant_message="Parent work is incomplete.",
+            background_tasks=[],
+            session_crons=[],
+        )
+    )
+
+    assert result.decision.action == DecisionAction.CONTINUE
+    assert {item.drift_type for item in result.evidence} == {DriftType.VALIDATION}
+
+
+def test_child_write_does_not_become_parent_unvalidated_write() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(
+        _actor_event(
+            adapter,
+            "PreToolUse",
+            "child",
+            tool_name="Write",
+            tool_use_id="child-write",
+            tool_input={"file_path": "/project/src/auth.py", "content": "changed"},
+        )
+    )
+
+    result = supervisor.process(
+        _actor_event(
+            adapter,
+            "Stop",
+            "parent",
+            stop_hook_active=False,
+            last_assistant_message="Parent is stopping.",
+            background_tasks=[],
+            session_crons=[],
+        )
+    )
+
+    assert result.decision.action == DecisionAction.ALLOW
+    assert not result.evidence
+
+
+def test_subagent_stop_uses_the_subagent_actor_history() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(
+        _actor_event(
+            adapter,
+            "PreToolUse",
+            "child",
+            tool_name="Write",
+            tool_use_id="child-write",
+            tool_input={"file_path": "/project/src/auth.py", "content": "changed"},
+        )
+    )
+
+    result = supervisor.process(
+        _actor_event(
+            adapter,
+            "SubagentStop",
+            "child",
+            stop_hook_active=False,
+            agent_type="reviewer",
+            agent_transcript_path="/tmp/subagent.jsonl",
+            last_assistant_message="Child work is incomplete.",
+            background_tasks=[],
+            session_crons=[],
+        )
+    )
+
+    assert result.decision.action == DecisionAction.CONTINUE
+    assert {item.drift_type for item in result.evidence} == {DriftType.VALIDATION}
+
+
+def test_actor_isolation_does_not_bypass_shared_forbidden_tools() -> None:
+    supervisor = Supervisor(anchors(forbidden_tools=frozenset({"shell"})))
+    adapter = ClaudeCodeAdapter()
+
+    result = supervisor.process(
+        _actor_event(
+            adapter,
+            "PreToolUse",
+            "child",
+            tool_name="Bash",
+            tool_use_id="child-shell",
+            tool_input={"command": "echo safe-looking"},
+        )
+    )
+
+    assert result.decision.action == DecisionAction.BLOCK
+    assert {item.drift_type for item in result.evidence} == {DriftType.CONSTRAINT}
+
+
+def test_validation_from_another_repo_cannot_validate_current_repo() -> None:
+    supervisor = Supervisor(anchors())
+    adapter = ClaudeCodeAdapter()
+    supervisor.process(
+        _actor_event(
+            adapter,
+            "PreToolUse",
+            "main",
+            repo_root="/project-a",
+            tool_name="Write",
+            tool_use_id="write-a",
+            tool_input={"file_path": "/project-a/src/auth.py", "content": "changed"},
+        )
+    )
+    supervisor.process(
+        _actor_event(
+            adapter,
+            "PostToolUse",
+            "main",
+            repo_root="/project-b",
+            tool_name="Bash",
+            tool_use_id="test-b",
+            tool_input={"command": "pytest -q"},
+            tool_response={"exit_code": 0},
+        )
+    )
+
+    result = supervisor.process(
+        _actor_event(
+            adapter,
+            "Stop",
+            "main",
+            repo_root="/project-a",
+            stop_hook_active=False,
+            last_assistant_message="Work is incomplete.",
+            background_tasks=[],
+            session_crons=[],
+        )
+    )
+
+    assert result.decision.action == DecisionAction.CONTINUE
+    assert {item.drift_type for item in result.evidence} == {DriftType.VALIDATION}
+
+
+def test_missing_native_actor_is_recorded_as_unknown_not_main() -> None:
+    event = ClaudeCodeAdapter().adapt_event(
+        claude_hook(
+            "PreToolUse",
+            tool_name="Bash",
+            tool_use_id="unknown-actor",
+            tool_input={"command": "echo ok"},
+        ),
+        timestamp=NOW,
+        repo_root="/project",
+    )
+
+    assert event.agent_id == "unknown"

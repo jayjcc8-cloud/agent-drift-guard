@@ -14,8 +14,14 @@ from agent_drift.protocol.events import AgentEvent, EventType
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 _PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
-_UNITTEST_FAILURE = re.compile(r"^\s*FAILED(?:\s*\([^\n]*\))?\s*$", re.MULTILINE)
-_UNITTEST_SUCCESS = re.compile(r"^\s*OK(?:\s*\([^\n]*\))?\s*$", re.MULTILINE)
+_UNITTEST_FAILURE = re.compile(
+    r"^[ \t]*FAILED(?:[ \t]*\([^\r\n]*\))?[ \t]*(?:\r?\n[ \t]*)*\Z",
+    re.MULTILINE,
+)
+_UNITTEST_SUCCESS = re.compile(
+    r"^[ \t]*OK(?:[ \t]*\([^\r\n]*\))?[ \t]*(?:\r?\n[ \t]*)*\Z",
+    re.MULTILINE,
+)
 
 HOOK_EVENT_TYPES: dict[str, EventType] = {
     "SessionStart": EventType.SESSION_START,
@@ -35,7 +41,9 @@ HOOK_EVENT_TYPES: dict[str, EventType] = {
 }
 
 
-def json_object(raw: Mapping[str, Any]) -> dict[str, JsonValue]:
+def json_object(raw: Any) -> dict[str, JsonValue]:
+    if not isinstance(raw, Mapping):
+        raise AdapterError("hook input must be a JSON object")
     try:
         return _JSON_OBJECT.validate_python(dict(raw))
     except ValidationError as exc:
@@ -115,16 +123,21 @@ def _infer_outcome(result: JsonValue, *, error_event: bool) -> str:
         return _infer_unittest_outcome(result) or "unknown"
     if not isinstance(result, dict):
         return "unknown"
+    structured_outcomes: list[str] = []
     success = result.get("success")
     if isinstance(success, bool):
-        return "success" if success else "failure"
+        structured_outcomes.append("success" if success else "failure")
     for key in ("exit_code", "exitCode", "status_code"):
         code = result.get(key)
         if isinstance(code, int) and not isinstance(code, bool):
-            return "success" if code == 0 else "failure"
+            structured_outcomes.append("success" if code == 0 else "failure")
     is_error = result.get("is_error")
     if isinstance(is_error, bool):
-        return "failure" if is_error else "success"
+        structured_outcomes.append("failure" if is_error else "success")
+    if "failure" in structured_outcomes:
+        return "failure"
+    if "success" in structured_outcomes:
+        return "success"
     # Claude Code 2.1.98 emits Bash PostToolUse responses as an object with
     # stdout/stderr but no exit code. unittest writes its terminal status to
     # either stream depending on the runner configuration.
@@ -248,7 +261,7 @@ def build_event(
 
     session_id = required_string(raw, "session_id")
     turn_id = optional_string(raw, "turn_id") or optional_string(raw, "prompt_id")
-    agent_id = optional_string(raw, "agent_id") or "main"
+    agent_id = optional_string(raw, "agent_id") or "unknown"
     cwd = required_string(raw, "cwd")
 
     common_keys = {

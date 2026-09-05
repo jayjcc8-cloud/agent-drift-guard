@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from time import perf_counter_ns
-from typing import Any
+from typing import Any, Literal
 
 from agent_drift.adapters import HookResponse, PlatformAdapter
+from agent_drift.adapters.decision_mapping import observation_response
 from agent_drift.core import SupervisionResult, Supervisor
 from agent_drift.observability import ObservationEnvelope, ObservationExporter
 from agent_drift.protocol.base import WireModel
@@ -19,6 +20,9 @@ class RuntimeOutcome(WireModel):
     export_error: str | None = None
 
 
+RuntimeMode = Literal["enforce", "observe"]
+
+
 class AgentDriftRuntime:
     """Handle native hooks end to end inside a long-lived process."""
 
@@ -28,10 +32,14 @@ class AgentDriftRuntime:
         supervisor: Supervisor,
         *,
         exporter: ObservationExporter | None = None,
+        mode: RuntimeMode = "enforce",
     ) -> None:
+        if mode not in {"enforce", "observe"}:
+            raise ValueError(f"unsupported runtime mode {mode!r}")
         self._adapter = adapter
         self._supervisor = supervisor
         self._exporter = exporter
+        self._mode = mode
 
     def handle(
         self,
@@ -49,7 +57,11 @@ class AgentDriftRuntime:
             sequence=sequence,
         )
         supervision = self._supervisor.process(event)
-        response = self._adapter.render_decision(supervision.event, supervision.decision)
+        response = (
+            observation_response()
+            if self._mode == "observe"
+            else self._adapter.render_decision(supervision.event, supervision.decision)
+        )
         duration_ms = (perf_counter_ns() - started) / 1_000_000
         export_error: str | None = None
         if self._exporter is not None:

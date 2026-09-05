@@ -85,3 +85,78 @@ def test_reprocessing_same_event_returns_persisted_result(tmp_path: Path) -> Non
     second = Supervisor(anchors, store=SQLiteStore(path)).process(event)
     assert second == first
     assert SQLiteStore(path).stats().events == 1
+
+
+def test_durable_history_isolates_parent_and_child_in_shared_session(tmp_path: Path) -> None:
+    path = tmp_path / "drift.db"
+    first = runtime(path)
+    first.handle(
+        hook(
+            "PreToolUse",
+            agent_id="parent",
+            tool_name="Write",
+            tool_use_id="parent-write",
+            tool_input={"file_path": "/project/src/app.py", "content": "changed"},
+        ),
+        timestamp=NOW,
+        repo_root="/project",
+    )
+    runtime(path).handle(
+        hook(
+            "PostToolUse",
+            agent_id="child",
+            tool_name="Bash",
+            tool_use_id="child-test",
+            tool_input={"command": "pytest -q"},
+            tool_response={"exit_code": 0},
+        ),
+        timestamp=NOW,
+        repo_root="/project",
+    )
+
+    parent_stop = runtime(path).handle(
+        hook(
+            "Stop",
+            agent_id="parent",
+            stop_hook_active=False,
+            last_assistant_message="Parent work is incomplete.",
+            background_tasks=[],
+            session_crons=[],
+        ),
+        timestamp=NOW,
+        repo_root="/project",
+    )
+
+    assert parent_stop.supervision.decision.action == DecisionAction.CONTINUE
+    assert {item.drift_type for item in parent_stop.supervision.evidence} == {DriftType.VALIDATION}
+
+
+def test_durable_child_write_is_not_attributed_to_parent(tmp_path: Path) -> None:
+    path = tmp_path / "drift.db"
+    runtime(path).handle(
+        hook(
+            "PreToolUse",
+            agent_id="child",
+            tool_name="Write",
+            tool_use_id="child-write",
+            tool_input={"file_path": "/project/src/app.py", "content": "changed"},
+        ),
+        timestamp=NOW,
+        repo_root="/project",
+    )
+
+    parent_stop = runtime(path).handle(
+        hook(
+            "Stop",
+            agent_id="parent",
+            stop_hook_active=False,
+            last_assistant_message="Parent is stopping.",
+            background_tasks=[],
+            session_crons=[],
+        ),
+        timestamp=NOW,
+        repo_root="/project",
+    )
+
+    assert parent_stop.supervision.decision.action == DecisionAction.ALLOW
+    assert not parent_stop.supervision.evidence

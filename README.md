@@ -17,6 +17,8 @@ Gemini CLI 等平台的生命周期事件转换成统一协议，再由独立的
 - `JsonlExporter` / replay：有界采集脱敏真实长会话、流式重跑当前策略，并比较决策、语义回归与
   人工标签质量。
 - Hook installer：幂等安装、健康检查或卸载 Codex 与 Claude Code 项目 Hook，并修复私有目录权限。
+- `observe` / `enforce`：前者保留 evidence 与 proposed decision 但不向宿主施加权限、输入、停止或
+  上下文动作；后者保留既有干预语义。
 
 这三个契约刻意不依赖 Detector、LLM Judge、数据库或具体平台 SDK。后续模块只能依赖它们，
 不能反向把平台细节带入 Core。
@@ -30,7 +32,7 @@ uv run agent-drift capabilities examples/codex-capabilities.json
 uv run agent-drift adapt-hook codex tests/fixtures/codex/pre_tool_use.json --repo-root /project
 uv run agent-drift adapter-capabilities claude-code
 uv run agent-drift store-init .agent-drift/drift.db
-uv run agent-drift install-hooks codex --project-root . --anchors examples/anchors.json
+uv run agent-drift install-hooks codex --project-root . --anchors examples/anchors.json --mode observe
 uv run agent-drift telemetry-status .agent-drift/observations.jsonl
 uv run agent-drift benchmark-hook codex tests/fixtures/codex/pre_tool_use.json \
   --anchors examples/anchors.json --iterations 30
@@ -73,3 +75,5 @@ Codex 0.147.0 与 Claude Code 2.1.98 的 8 个受控真实会话建立 40 事件
 Codex 一键安装要求目标位于 Git worktree 内；仓库子目录会通过 Git 根目录下的相对路径定位私有
 runner。`hook-status` 不只检查配置标记，还验证 runner、anchors 和私有权限，降级安装返回退出码 1。
 它同时核对 managed handler 的完整定义与唯一性，并确认 `.agent-drift/` 仍受 `.gitignore` 保护。
+新安装即使省略安装命令的 `--mode`，生成的 runner 也会显式写入 `--mode observe`；现有 legacy 或
+enforce runner 不会被静默降级。手工运行 `agent-drift hook` 时省略 mode 仍保持历史 enforce 行为。

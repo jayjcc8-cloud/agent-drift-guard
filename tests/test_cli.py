@@ -346,7 +346,9 @@ class CliTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(install_code, 0)
-            self.assertEqual(len(json.loads(stdout.getvalue())["installed_events"]), 11)
+            install_result = json.loads(stdout.getvalue())
+            self.assertEqual(len(install_result["installed_events"]), 11)
+            self.assertEqual(install_result["mode"], "observe")
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -364,6 +366,7 @@ class CliTests(unittest.TestCase):
             status = json.loads(stdout.getvalue())
             self.assertEqual(len(status["installed_events"]), 11)
             self.assertTrue(status["healthy"])
+            self.assertEqual(status["mode"], "observe")
 
             with redirect_stdout(io.StringIO()):
                 uninstall_code = main(
