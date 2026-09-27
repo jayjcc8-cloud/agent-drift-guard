@@ -1,5 +1,7 @@
 # Agent Drift Guard
 
+> **Status: archived / no longer actively developed.**
+
 Agent Drift Guard 是一个平台无关的 AI Agent Runtime Supervisor。它把 Codex、Claude Code、
 Gemini CLI 等平台的生命周期事件转换成统一协议，再由独立的检测、策略和恢复模块判断是否发生
 目标漂移、约束遗忘、状态误判、计划偏离或循环失控。
